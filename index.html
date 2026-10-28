@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>viicell-face</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+
+  <body data-mode="manual">
+    <main id="stage">
+      <canvas id="output" width="1280" height="720"></canvas>
+    </main>
+
+    <!-- The tracking camera the landmarker reads; a DOM canvas, so it can never
+         end up in the frames that are read back for the virtual camera. -->
+    <canvas id="debug-camera" class="debug-camera" aria-hidden="true" hidden></canvas>
+
+    <div id="hud" class="hud" data-state="starting">
+      <span class="dot"></span>
+      <span id="hud-text">starting…</span>
+    </div>
+
+    <div id="input-hint" class="input-hint" hidden>
+      global keys off — run <code>sudo scripts/setup-input-access.sh</code>
+    </div>
+
+    <div id="track-hint" class="input-hint track-hint" hidden></div>
+
+    <button id="calibrate" class="calibrate-button" type="button">Calibrate face</button>
+
+    <div id="calibration" class="calibration" hidden>
+      <p class="calibration-title">Face calibration <span id="calibration-count"></span></p>
+      <p id="calibration-text" class="calibration-instruction"></p>
+      <div id="calibration-camera" class="calibration-camera"></div>
+      <div class="calibration-track"><span id="calibration-fill"></span></div>
+      <p id="calibration-note" class="calibration-note">Hold the pose until the bar fills</p>
+      <div class="calibration-actions">
+        <button id="calibration-cancel" type="button">Cancel</button>
+        <button id="calibration-next" type="button">Next</button>
+      </div>
+    </div>
+
+    <aside id="guide" class="guide" aria-label="Keyboard shortcuts">
+      <h2>Keys</h2>
+      <div class="row" id="mode-row">
+        <span class="keys">tap <kbd>M</kbd></span>
+        <span class="what">mode: <b id="mode-name">manual</b></span>
+      </div>
+      <div class="row">
+        <span class="keys"><kbd>Z</kbd><kbd>X</kbd><kbd>C</kbd></span>
+        <span class="what">brows · cheeks · eyes</span>
+      </div>
+      <div class="row">
+        <span class="keys">tap <kbd>Z</kbd><kbd>X</kbd><kbd>C</kbd></span>
+        <span class="what">blink</span>
+      </div>
+      <div class="row">
+        <span class="keys"><kbd>V</kbd><kbd>B</kbd></span>
+        <span class="what">iris · pupils</span>
+      </div>
+      <div class="row">
+        <span class="keys">tap <kbd>V</kbd><kbd>B</kbd></span>
+        <span class="what">back to drawn size</span>
+      </div>
+      <div class="row">
+        <span class="keys"><kbd>N</kbd><kbd>J</kbd><kbd>L</kbd><kbd>H</kbd></span>
+        <span class="what">mouth: width · open · lip · corners</span>
+      </div>
+      <div class="row">
+        <span class="keys">tap <kbd>N</kbd><kbd>J</kbd><kbd>L</kbd><kbd>H</kbd></span>
+        <span class="what">back to rest mouth</span>
+      </div>
+      <div class="row">
+        <span class="keys"><kbd>0</kbd> + <kbd>1</kbd>–<kbd>5</kbd></span>
+        <span class="what">track from a corner</span>
+      </div>
+      <div class="row">
+        <span class="keys">tap <kbd>0</kbd></span>
+        <span class="what">back to centre</span>
+      </div>
+      <div class="row" id="lean-row">
+        <span class="keys">hold <kbd>space</kbd></span>
+        <span class="what">lean · gaze holds</span>
+      </div>
+      <div class="row">
+        <span class="keys">tap <kbd>R</kbd></span>
+        <span class="what">recalibrate · retry camera</span>
+      </div>
+      <div class="row">
+        <span class="keys"><kbd>D</kbd></span>
+        <span class="what">skeleton overlay</span>
+      </div>
+      <div class="row" id="debug-row">
+        <span class="keys">tap <kbd>T</kbd></span>
+        <span class="what">camera + landmarks</span>
+      </div>
+      <p class="note">hold a mouse side button for every key</p>
+      <p class="note">scroll up opens, grows · down closes</p>
+      <p class="note">iris and pupils stay on <kbd>V</kbd><kbd>B</kbd> in both modes</p>
+    </aside>
+
+    <section id="error-panel" class="panel" hidden>
+      <h1>No virtual camera</h1>
+      <p id="error-text"></p>
+      <p class="hint">
+        The canvas is published through a <code>v4l2loopback</code> device. Create one with
+        <code>sudo scripts/setup-virtual-camera.sh</code>, then try again.
+      </p>
+      <button id="retry" type="button">Try again</button>
+    </section>
+  </body>
+</html>

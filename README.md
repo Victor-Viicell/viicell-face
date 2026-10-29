@@ -47,6 +47,8 @@ both.
 | `src/hud.ts` | The status row as a pure chip builder over one snapshot: label, state and tooltip per chip (unit tested) |
 | `src/settings_view.ts` | The settings panel's choices and read-backs: sizes, rates, the origin grid, how a size is parsed (unit tested) |
 | `src/settings_panel.ts` | The settings controls: one paint from the store, the restart, the busy state, the fold |
+| `src/onboarding.ts` | The first-run wizard's decisions: which of the four steps is settled, what its line says, whether the face can be broadcast (unit tested) |
+| `src/onboarding_panel.ts` | The wizard's DOM half: one probe, one paint, `Check again` and the `onboarded` flag |
 | `src/layout.ts` | The window as arithmetic: docked column width, the letterboxed 16:9 canvas at a whole-number scale, the face safe area (unit tested) |
 | `src/shell.ts` | The only module that touches element ids: the dock (fold, layout paint), the status row, error panel, hints, calibration panel, look overlay |
 | `src/stream.ts` | The frame pump, `applyOutput` (buffer + scale + rate + writer together) and the once-a-second health poll |
@@ -593,6 +595,31 @@ Linux with:
   runtime and the FaceLandmarker model ship with the app in `public/`
   (`scripts/sync-mediapipe.sh` refreshes them), so tracking works offline.
 
+## First run
+
+A configuration that has never been through the app opens with **first run**:
+four steps over the stage, each with its current state, one line on what it is
+for, and the one action that applies to it.
+
+| Step | Settled when | If it is not |
+| --- | --- | --- |
+| **virtual camera** | `list_video_devices` reports a loopback node that can be written to | red, with `sudo scripts/setup-virtual-camera.sh` ready to copy — nothing can be broadcast without it |
+| **keys from any window** | the input devices are readable | amber with `sudo scripts/setup-input-access.sh`; the keys still work while the window has focus |
+| **microphone** | the mouth reports `live` | amber, with the mic fix when it reported a failure; without it the synth line just rests |
+| **webcam for facial track** | `list_video_devices` lists a capture node | amber: manual mode still poses the face |
+
+**Check again** re-reads the devices and, once the camera is there, asks the
+writer to open it — so a loopback that exists but will not open (`busy`,
+`permission denied`) turns the camera row red in the writer's own words, with
+its own fix. **Skip** — **Done** when nothing is missing — closes the wizard for
+good: the flag is `onboarded` in `settings.json`, and the dock's **setup** row
+brings the steps back without clearing it.
+
+The wizard writes no commands of its own: every fix is the one `src/errors.ts`
+already hands the failure panel, so the two can never disagree. While it is open
+that panel stays quiet, because the same failure in two boxes over one canvas is
+noise rather than help.
+
 ### Wayland and DMA-BUF
 
 On some driver/compositor combinations (NVIDIA on Hyprland, for instance)
@@ -785,8 +812,9 @@ and the v4l2 format are all started from the numbers it holds.
   `src/config.ts` re-exports the output size from there, so there is one place to
   change them.
 
-The same file also carries the window size/position and the dock's width and
-folded flag (saved when you fold it). They are validated the same way and written
+The same file also carries the window size/position, the dock's width and
+folded flag (saved when you fold it) and `onboarded` (whether the first-run
+steps have been seen). They are validated the same way and written
 debounced, so a burst of changes is a single write. Three keys are groundwork
 with no control yet: `deviceId` (the loopback device — `start_camera` still picks
 one itself, and `VIICELL_VIDEO_DEVICE` overrides), `cameraId` (the tracking

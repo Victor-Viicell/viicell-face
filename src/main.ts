@@ -15,6 +15,7 @@ import { Gaze } from "./gaze";
 import { startInput } from "./input";
 import { faceMode, setFaceMode, startupFaceMode, subscribeMode } from "./mode";
 import { stopFaceCamera } from "./face_camera";
+import { installWizard } from "./onboarding_panel";
 import { SettingsStore, type SettingsAdapter } from "./settings";
 import { installSettingsPanel } from "./settings_panel";
 import * as shell from "./shell";
@@ -137,6 +138,10 @@ async function boot(): Promise<void> {
   installSettingsPanel(settings, { reconnect: () => applyOutput(app, rig, settings), setOrigin });
   shell.fillInputHint();
   void startInput();
+  // The first-run steps. Tauri only: the preview has no devices to set up. Opened
+  // before the stream is claimed, so a fresh config lands in the wizard, not in
+  // an error panel over a dead canvas.
+  if (isTauri) installWizard(settings, () => (mouth ? { state: mouth.state, error: mouth.error } : null));
 
   // Two ways to pose the face, sharing one rig. Switching re-applies whichever
   // side takes over instead of leaving the other side's pose on the bones.

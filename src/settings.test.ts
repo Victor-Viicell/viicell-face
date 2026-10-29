@@ -55,6 +55,7 @@ describe("mergeSettings", () => {
       startMode: "track",
       window: { width: 900, height: 600, x: 40, y: -20 },
       panel: { width: 380, collapsed: true },
+      onboarded: true,
     };
     expect(mergeSettings(saved)).toEqual(saved);
   });
@@ -137,6 +138,15 @@ describe("mergeSettings", () => {
       x: 101,
       y: null,
     });
+  });
+
+  test("keeps the first-run flag, and only a boolean counts", () => {
+    expect(mergeSettings({ onboarded: true }).onboarded).toBe(true);
+    expect(mergeSettings({ onboarded: false }).onboarded).toBe(false);
+    // A hand-edited file must not read as "already set up" off some other value.
+    expect(mergeSettings({ onboarded: "yes" }).onboarded).toBe(false);
+    expect(mergeSettings({ onboarded: 1 }).onboarded).toBe(false);
+    expect(DEFAULT_SETTINGS.onboarded).toBe(false);
   });
 
   test("treats a non-object payload as empty", () => {

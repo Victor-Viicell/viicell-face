@@ -57,6 +57,14 @@ export interface Settings {
   startMode: FaceMode;
   window: WindowSettings;
   panel: PanelSettings;
+  /**
+   * The first-run wizard has been through once — finished or skipped.
+   *
+   * This is what makes the *second* boot land on the face instead of the step
+   * list: the wizard's own state is the hardware, which a fresh install cannot
+   * know before it has been looked at once.
+   */
+  onboarded: boolean;
 }
 
 /**
@@ -98,6 +106,7 @@ export const DEFAULT_SETTINGS: Settings = {
   startMode: "manual",
   window: { width: 1280, height: 800, x: null, y: null },
   panel: { width: 320, collapsed: false },
+  onboarded: false,
 };
 
 const HEX_COLOUR = /^#[0-9a-f]{6}$/i;
@@ -194,6 +203,7 @@ export function mergeSettings(raw: unknown, base: Settings = DEFAULT_SETTINGS): 
       width: integer(panel.width, LIMITS.panel.minWidth, LIMITS.panel.maxWidth, base.panel.width),
       collapsed: typeof panel.collapsed === "boolean" ? panel.collapsed : base.panel.collapsed,
     },
+    onboarded: typeof source.onboarded === "boolean" ? source.onboarded : base.onboarded,
   };
 }
 

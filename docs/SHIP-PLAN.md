@@ -59,12 +59,12 @@ Ticket format: **goal** — *acceptance* (the thing that must be true) — files
   restart; invalid sizes are clamped before they reach Rust.
   — `src/settings_panel.ts`, `src/settings_view.ts`, `stream.ts`, `settings.ts`
 
-- [ ] **VF-013 first-run wizard** — 4 steps: virtual camera present? → input
+- [x] **VF-013 first-run wizard** — 4 steps: virtual camera present? → input
   permission → microphone → webcam. Each step: current state, what it is for,
   one button (copy command / retry / skip). Remembered; can be reopened from
   the panel. *Acceptance:* a fresh config with no loopback device lands in the
   wizard, not in a dead canvas; skipping is respected on next boot.
-  — `src/onboarding.ts`, `index.html`
+  — `src/onboarding.ts`, `src/onboarding_panel.ts`, `index.html`
 
 - [ ] **VF-014 shortcut overlay** — replace the always-visible `aside#guide`
   with an overlay on `F1`/`?` (Esc closes), grouped by task, showing only the

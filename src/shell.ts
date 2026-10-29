@@ -41,6 +41,13 @@ export const settingSize = q<HTMLSelectElement>("#setting-size");
 export const settingFps = q<HTMLSelectElement>("#setting-fps");
 export const settingOrigin = q<HTMLElement>("#setting-origin");
 export const settingStartTrack = q<HTMLInputElement>("#setting-start-track");
+/** The first-run steps, reopened from the settings section; `onboarding_panel.ts` owns them. */
+export const settingSetup = q<HTMLButtonElement>("#setting-setup");
+export const wizardPanel = q<HTMLElement>("#wizard");
+export const wizardList = q<HTMLElement>("#wizard-steps");
+export const wizardCount = q<HTMLElement>("#wizard-count");
+export const wizardRetry = q<HTMLButtonElement>("#wizard-retry");
+export const wizardClose = q<HTMLButtonElement>("#wizard-close");
 /** The scrolling half of the dock; the camera preview docks here between runs. */
 const panelBody = q<HTMLElement>("#panel-body");
 /** The camera preview canvas; it moves into the calibration panel and back. */
@@ -300,6 +307,26 @@ export function setTrackHint(message: string | null): void {
  */
 let panelProblem: AppError | null = null;
 const dismissed = new Set<ErrorCode>();
+/** The first-run wizard is up: it already says what the panel would say. */
+let wizardOpen = false;
+
+/**
+ * Opens or closes the first-run wizard's claim on the panel's slot.
+ *
+ * A fresh machine has no loopback device, so `connect()` fails behind the
+ * wizard and paints the very sentence the wizard's first step is showing — two
+ * boxes over the same canvas, for one fact. While the wizard is up the panel
+ * stays quiet instead, and the next poll restores whatever still deserves it
+ * once it closes.
+ */
+export function setWizardOpen(open: boolean): void {
+  wizardOpen = open;
+  if (open) {
+    panelProblem = null;
+    errorPanel.hidden = true;
+    errorPanel.removeAttribute("data-code");
+  }
+}
 
 /** A device recovered: the next failure of this kind may speak again. */
 export function clearDismissed(): void {
@@ -314,6 +341,7 @@ export function forgetDismissed(...codes: ErrorCode[]): void {
 }
 
 export function setPanelProblem(next: AppError | null): void {
+  if (wizardOpen) return;
   if (next !== null && dismissed.has(next.code)) {
     if (panelProblem !== null) {
       panelProblem = null;
@@ -388,16 +416,16 @@ export function fillInputHint(): void {
 
 /** Copies the panel's fix command. */
 export function copyErrorFix(): Promise<void> {
-  return copyCommand(errorFixText.textContent ?? "", errorCopy);
+  return copyText(errorFixText.textContent ?? "", errorCopy);
 }
 
 /** Copies the input hint's fix command. */
 export function copyInputFix(): Promise<void> {
-  return copyCommand(inputHintFix.textContent ?? "", inputHintCopy);
+  return copyText(inputHintFix.textContent ?? "", inputHintCopy);
 }
 
 /** Copies a fix command, then says so on the button for a moment. */
-async function copyCommand(text: string, button: HTMLButtonElement): Promise<void> {
+export async function copyText(text: string, button: HTMLButtonElement): Promise<void> {
   if (text.length === 0) return;
   let copied = false;
   try {

@@ -70,6 +70,17 @@
             <span>open in track</span>
             <input id="setting-start-track" type="checkbox" />
           </label>
+          <div class="setting-row">
+            <span>setup</span>
+            <button
+              id="setting-setup"
+              class="setting-button"
+              type="button"
+              title="The first-run steps again: camera, keys, mic, webcam"
+            >
+              the four steps
+            </button>
+          </div>
         </section>
 
         <div id="calibrate" class="calibrate-group">
@@ -207,6 +218,21 @@
         <button id="calibration-next" type="button">Next</button>
       </div>
     </div>
+
+    <!-- The first-run wizard: four steps over the stage, one row each, built
+         from `src/onboarding.ts` by `src/onboarding_panel.ts`. It is a dialog and
+         not another dock section on purpose — the body already scrolls at a
+         small window. Reopened from the settings section's `setup` row. -->
+    <section id="wizard" class="wizard" aria-label="First run" hidden>
+      <p class="wizard-title">
+        first run <span id="wizard-count" class="wizard-count"></span>
+      </p>
+      <ol id="wizard-steps" class="wizard-steps"></ol>
+      <div class="wizard-actions">
+        <button id="wizard-retry" type="button">Check again</button>
+        <button id="wizard-close" type="button">Skip</button>
+      </div>
+    </section>
 
     <!-- One panel for every device failure; the title, the detail and the fix
          come from `src/errors.ts` (classify), never from a raw Rust string. -->

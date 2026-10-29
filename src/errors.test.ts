@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classify, inputDenied, isAppError, type ErrorCode } from "./errors";
+import { classify, deviceMissing, inputDenied, isAppError, type ErrorCode } from "./errors";
 
 /**
  * The strings here are copied from `src-tauri/src/*.rs` on purpose: the point
@@ -151,6 +151,15 @@ describe("everything else", () => {
     const twice = fix(once, "face-camera");
     expect(twice).toBe(once);
     expect(twice.code).toBe("device_missing");
+  });
+
+  test("deviceMissing is the same failure the panel would classify", () => {
+    const problem = deviceMissing();
+    expect(problem.code).toBe("device_missing");
+    expect(problem.fix).toBe("sudo scripts/setup-virtual-camera.sh");
+    // The wizard names the failure before any camera has been asked to start, so
+    // it must be indistinguishable from the one Rust produces later.
+    expect(classify(problem)).toEqual(problem);
   });
 
   test("isAppError rejects lookalikes", () => {

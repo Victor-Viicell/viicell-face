@@ -333,3 +333,66 @@ changed, what was verified and how, what was NOT verified.
   `root.scale.set` in the preview (the face is not drawn there without WebGL
   readback). The panel's persistence across a real quit depends on the debounced
   write landing — `beforeunload` still calls `settings.save()`.
+
+## 2026-10-29 — session 7 — VF-013 first-run wizard
+
+* **Changed**: a fresh config now opens with four steps over the stage instead
+  of landing in an error panel on a dead canvas.
+  * `src/onboarding.ts` (new, 233) — the decisions, no DOM: `OnboardingFacts`
+    (device list or `null` when the backend would not answer, `keysAreGlobal`,
+    the mic's state), `wizardSteps` → four `WizardStep`s (id, title, purpose,
+    state `ready|degraded|missing|unknown`, `stateText`, `fix`, `blocking`),
+    plus `readyCount`, `firstUnready`, `canBroadcast`, `cameraFailure` (folds the
+    writer's refusal back into the camera row), `needsWizard`, `loopbackDevice`
+    and `captureDevice`. `STEP_ORDER`/`STEP_COPY` are the fixed words, shared
+    with the panel so a title cannot drift. No command literal in the file — a
+    test scans for `sudo `/`systemctl `.
+  * `src/errors.ts` — `deviceMissing()`, the sibling of `inputDenied()`: the
+    wizard names the missing loopback *before* any camera is asked to start, so
+    it needs the same words and the same command the panel would use after a
+    real failure. `MIC_FIX` and `inputDenied().fix` are reused as they are.
+  * `src/onboarding_panel.ts` (new, 198) — one probe (`list_video_devices` +
+    `keysAreGlobal` + the mic), one paint, `Check again` and `Skip`/`Done`.
+    Retry only asks `connect()` when the camera row is ready, then reads
+    `cameraStatus()`: a loopback that exists but will not open turns the row red
+    in the writer's own words. The camera the wizard probes cannot mask a busy
+    device, which is why the writer is asked.
+  * `src/settings.ts` — `onboarded: boolean` (default `false`) in `Settings`,
+    `DEFAULT_SETTINGS` and `mergeSettings` (boolean or nothing).
+  * `src/shell.ts` — six new ids (`#setting-setup`, `#wizard`, `#wizard-steps`,
+    `#wizard-count`, `#wizard-retry`, `#wizard-close`), `setWizardOpen(open)`
+    (while the wizard is up `setPanelProblem` returns early and the panel is
+    cleared, so the same failure is not shown twice over one canvas) and the
+    private `copyCommand` became the exported `copyText` the wizard's per-row
+    Copy uses.
+  * `index.html` / `src/styles.css` — the wizard dialog (like `.calibration`,
+    but 420 px and scrollable), a four-row step list built in JS, and the
+    `setup` row in the settings section.
+  * `src/main.ts` (247, was 242) — one guarded line installing the wizard:
+    Tauri only (the preview has no devices), with the mic accessor.
+* **Verified**: `scripts/check.sh` → CHECK GREEN (`tsc --noEmit`; `bun test`
+  320 pass / 16 files — `src/onboarding.test.ts` is new, 26 tests over the four
+  states, the optionality of everything but the camera, the first gap, the folded
+  writer failure, `needsWizard` and the no-commands-of-its-own scan; `vite
+  build`; `cargo test --lib`; `cargo check`). Windows gate still SKIP. In
+  Chromium against `vite dev`, driving the real modules over CDP: with the
+  module installed on a `SettingsStore(null)` and no Tauri, the wizard opened by
+  itself, painted `0/4` with the camera `unknown`/`next`, keys `degraded` with
+  `sudo scripts/setup-input-access.sh` in its Copy, mic and webcam `unknown`,
+  and `Skip`; clicking Copy ran the clipboard path and said `Copy failed` (no
+  user gesture), clicking Skip hid it and wrote `onboarded: true` to the store,
+  and the dock's `setup` row reopened it. With `window.__TAURI_INTERNALS__`
+  stubbed to answer `list_video_devices`/`camera_status`, the same install
+  painted `found /dev/video10 (Upright Camera)`, mic `live`, webcam `found
+  /dev/video0 (Integrated Camera)`, `3/4`, and the button read `Done`. At
+  640×360 the box is 288×312 px inside the stage, no row clips horizontally
+  (`scrollWidth == clientWidth`) after the state line was changed to wrap
+  instead of ellipsise, both buttons fit, and the content scrolls (406 vs 310).
+  A plain `vite dev` load leaves `#wizard` hidden with no rows built.
+* **Not verified**: the whole retry path against a real device — `connect()` is
+  called only under Tauri, and this box has no window, so "loopback appears →
+  writer opens at the saved size" was never executed; the preview throws in
+  `deps()` by design. `VIICELL_FACE_DEVICE` is invisible to the webview, so the
+  webcam row only claims "a capture node exists" — a pin at an unusable node is
+  only reported by `camera_missing` in track mode. The mic fix command remains
+  unrun on this box.

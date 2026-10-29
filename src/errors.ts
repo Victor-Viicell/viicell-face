@@ -258,3 +258,20 @@ export function inputDenied(): AppError {
     fix: SETUP_INPUT,
   };
 }
+
+/**
+ * The state a fresh machine is in before `scripts/setup-virtual-camera.sh` ran:
+ * there is no loopback device to broadcast into.
+ *
+ * Same reasoning as {@link inputDenied} — the first-run wizard has to name this
+ * failure before any camera has been asked to start, and it must name it with
+ * the same words and the same command the panel uses, not a second copy.
+ */
+export function deviceMissing(): AppError {
+  return {
+    code: "device_missing",
+    message: "no virtual camera device on this machine",
+    detail: "no v4l2loopback device found",
+    fix: SETUP_CAMERA,
+  };
+}

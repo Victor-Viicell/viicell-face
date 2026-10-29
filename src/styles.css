@@ -895,3 +895,192 @@ body[data-mode="manual"] .calibrate-group {
   gap: 8px;
   justify-content: flex-end;
 }
+
+/*
+ * The first-run wizard: a dialog over the stage, like the calibration run, and
+ * for the same reason — it is one of the two things allowed to cover the face,
+ * and only until the person has ridden it once. It is not a dock section: the
+ * body already scrolls at 640×360 and four steps would make it a wall.
+ */
+.wizard {
+  position: fixed;
+  top: 50%;
+  left: calc((100% - var(--panel-width, 320px)) / 2);
+  z-index: 6;
+  width: min(420px, calc(100% - var(--panel-width, 320px) - 32px));
+  max-height: calc(100% - 48px);
+  overflow-y: auto;
+  padding: 14px 16px 16px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgb(137 180 250 / 24%);
+  border-radius: 16px;
+  background: rgb(17 17 27 / 97%);
+  box-shadow: 0 16px 48px rgb(17 17 27 / 55%);
+  pointer-events: auto;
+}
+
+.wizard[hidden] {
+  display: none;
+}
+
+.wizard-title {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 10px;
+  color: var(--overlay0);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+/* The count is what makes "four steps" feel finite: 1/4 is progress. */
+.wizard-count {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.wizard-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.wizard-step {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  padding: 7px 9px;
+  border: 1px solid rgb(205 214 244 / 8%);
+  border-radius: 9px;
+  background: rgb(24 24 37 / 72%);
+}
+
+/* The one step worth reading first: the same blue the active controls use. */
+.wizard-step.next {
+  border-color: rgb(137 180 250 / 40%);
+}
+
+.wizard-step-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.wizard-step-title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Wraps instead of ellipsising: at 640×360 the box is 288 px wide and a
+ * "found /dev/video10 (Upright Camera)" that ended in "…" would be a truncation
+ * of the one fact the step exists to report. */
+.wizard-step-state {
+  min-width: 0;
+  color: var(--overlay1);
+  font-size: 10.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.wizard-step-why {
+  grid-column: 1 / 2;
+  margin: 0;
+  color: var(--overlay0);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+/* Colour is the whole status: a settled step is quiet, a missing one is red. */
+.wizard-step[data-state="ready"] .wizard-step-state {
+  color: var(--green);
+}
+
+.wizard-step[data-state="degraded"] .wizard-step-state {
+  color: var(--yellow);
+}
+
+.wizard-step[data-state="missing"] .wizard-step-state,
+.wizard-step[data-state="missing"] .wizard-step-title {
+  color: var(--red);
+}
+
+.wizard-copy {
+  align-self: start;
+  padding: 2px 8px;
+  border: 1px solid rgb(137 180 250 / 22%);
+  border-radius: 6px;
+  background: rgb(17 17 27 / 82%);
+  color: var(--subtext1);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.wizard-copy[hidden] {
+  display: none;
+}
+
+.wizard-copy:hover {
+  border-color: rgb(137 180 250 / 45%);
+  color: var(--text);
+}
+
+.wizard-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.wizard-actions button {
+  min-width: 92px;
+  padding: 6px 14px;
+  border: 1px solid var(--surface1);
+  border-radius: 8px;
+  background: var(--surface0);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.wizard-actions button:hover {
+  border-color: var(--surface2);
+  background: var(--surface1);
+}
+
+#wizard-close {
+  border-color: rgb(137 180 250 / 45%);
+  background: rgb(137 180 250 / 16%);
+}
+
+/* The settings row that reopens the wizard — same weight as the origin grid. */
+.setting-button {
+  justify-self: start;
+  padding: 3px 8px;
+  border: 1px solid rgb(137 180 250 / 18%);
+  border-radius: 4px;
+  background: rgb(17 17 27 / 82%);
+  color: var(--overlay1);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.setting-button:hover {
+  border-color: rgb(137 180 250 / 45%);
+  color: var(--text);
+}
+
+.setting-button:focus-visible {
+  outline: 1px solid var(--blue);
+  outline-offset: 1px;
+}

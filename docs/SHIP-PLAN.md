@@ -20,7 +20,7 @@ Ticket format: **goal** — *acceptance* (the thing that must be true) — files
   unknown/old keys are ignored instead of resetting the file.
   — `src/settings.ts`, `src/settings.test.ts`, `src-tauri/src/lib.rs`
 
-- [ ] **VF-004 error taxonomy** — one `AppError { code, message, detail, fix? }`
+- [x] **VF-004 error taxonomy** — one `AppError { code, message, detail, fix? }`
   type; every `invoke` failure and every device problem maps into it; one panel
   renders `message` + `fix` (copyable command), never a raw Rust string.
   *Acceptance:* a missing loopback device, a busy webcam, a denied mic and a

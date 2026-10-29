@@ -56,3 +56,45 @@ changed, what was verified and how, what was NOT verified.
   the settings path on Windows/Android (`app_config_dir` untested there), and
   whether the window keeps any position between runs (nothing reads
   `window.*` yet).
+
+## 2026-10-29 — session 2 — VF-004 error taxonomy
+
+* **Changed**: `src/errors.ts` (+ `src/errors.test.ts`) — `AppError { code,
+  message, detail, fix? }`, `ErrorCode` (device_missing, device_busy,
+  device_invalid, device_denied, camera_missing, camera_busy, camera_denied,
+  mic_missing, mic_denied, format_unsupported, input_denied,
+  gstreamer_missing, backend_unreachable, unknown), and `classify(error,
+  source)` — an ordered rule table over the regexes of the sentences
+  `src-tauri/src/{virtual_camera,face_camera,microphone}.rs` actually send. An
+  optional `source` ("camera" | "face-camera" | "mic" | "input") separates the
+  virtual camera's "busy" from the webcam's, which the strings cannot. Already
+  classified errors pass through, so double classification is lossless.
+  `inputDenied()` is the udev/input case the app knows without a string.
+  `index.html` — the panel is now `#error-title` + `#error-text` + `#error-fix`
+  (`code#error-fix-text` + Copy) + Try again / Dismiss; the input hint gained
+  its own text/code/Copy nodes. `src/main.ts` — `showError(unknown, source)` is
+  the only entry point; `setPanelProblem` holds one error slot, dedupes by
+  code+detail so the one-second poll cannot repaint, and `dismissed` (a
+  Set<ErrorCode>) suppresses a dismissed code until that device recovers or the
+  mode changes. The tracking camera's failure is promoted into the panel from
+  `beginTracking` (rejected start) and `refreshStatus` (`faceProblem`), which
+  outranks `micProblem()`. `copyCommand` uses `navigator.clipboard` and falls
+  back to a hidden textarea + `execCommand`. `src/styles.css` —
+  `.error-fix`, `.panel-actions`, `.input-hint button` (the hint keeps
+  `pointer-events: none` for everything but that button). `README.md` — new
+  "When a device fails" section with the code→command table, and `errors.ts`
+  added to the file map.
+* **Rust untouched on purpose**: the ticket said classify, not rewrite, so the
+  taxonomy lives in exactly one place.
+* **Verified**: `scripts/check.sh` → CHECK GREEN (`tsc --noEmit` clean;
+  `bun test` 218 pass across 11 files, 25 of them new in `errors.test.ts`;
+  `vite build` ok; `cargo test --lib` and `cargo check` unchanged and ok).
+  Windows compile gate still SKIP (no target installed).
+* **Not verified**: everything visual — no display in this session, so the panel
+  layout, the Copy button inside the WebKitGTK webview (is `navigator.clipboard`
+  available there, or does it always fall through to `execCommand`?) and the
+  dismissal behaviour are unproven. Also unproven: that restarting the user
+  PipeWire service actually restores a denied microphone on this box — it is the
+  standard remedy for "the device is there but will not open", not something
+  measured here. `gstreamer_missing` has no producer today (nothing in the app
+  calls `getUserMedia`); the code exists so the webview capture path has a home.

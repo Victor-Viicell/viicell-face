@@ -30,8 +30,12 @@
       <span id="hud-text">starting…</span>
     </div>
 
+    <!-- The classified `input_denied` hint: the keys work, but only while this
+         window has focus, and the fix is one command to copy. -->
     <div id="input-hint" class="input-hint" hidden>
-      global keys off — run <code>sudo scripts/setup-input-access.sh</code>
+      <span id="input-hint-text"></span>
+      <code id="input-hint-fix"></code>
+      <button id="input-hint-copy" type="button">Copy</button>
     </div>
 
     <div id="track-hint" class="input-hint track-hint" hidden></div>
@@ -140,14 +144,19 @@
       <p class="note">iris and pupils stay on <kbd>V</kbd><kbd>B</kbd> in both modes</p>
     </aside>
 
+    <!-- One panel for every device failure; the title, the detail and the fix
+         come from `src/errors.ts` (classify), never from a raw Rust string. -->
     <section id="error-panel" class="panel" hidden>
-      <h1>No virtual camera</h1>
+      <h1 id="error-title">Something went wrong</h1>
       <p id="error-text"></p>
-      <p class="hint">
-        The canvas is published through a <code>v4l2loopback</code> device. Create one with
-        <code>sudo scripts/setup-virtual-camera.sh</code>, then try again.
-      </p>
-      <button id="retry" type="button">Try again</button>
+      <div id="error-fix" class="error-fix" hidden>
+        <code id="error-fix-text"></code>
+        <button id="error-copy" type="button">Copy</button>
+      </div>
+      <div class="panel-actions">
+        <button id="retry" type="button">Try again</button>
+        <button id="error-dismiss" type="button">Dismiss</button>
+      </div>
     </section>
   </body>
 </html>

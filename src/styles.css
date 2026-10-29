@@ -164,6 +164,27 @@ body {
   color: var(--yellow);
 }
 
+/*
+ * The hint is text over the canvas, so it takes no pointer events — except the
+ * one button that copies the fix command.
+ */
+.input-hint button {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid rgb(249 226 175 / 25%);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--yellow);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.input-hint button:hover {
+  background: rgb(249 226 175 / 12%);
+}
+
 /* A second hint, stacked above the global-keys one. */
 .track-hint {
   bottom: 90px;
@@ -574,4 +595,31 @@ body[data-mode="manual"] .calibrate-group {
 .panel button:hover {
   border-color: var(--surface2);
   background: var(--surface1);
+}
+
+/* The fix: one command, monospace, and the single button that copies it. */
+.error-fix {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.error-fix[hidden] {
+  display: none;
+}
+
+.error-fix code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px 9px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }

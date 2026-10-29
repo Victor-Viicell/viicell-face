@@ -43,6 +43,7 @@ both.
 | `src/face/debug_view.ts` | Camera preview with the landmarks and the values read from them (`T`) |
 | `src/face/crop.ts` | The preview's face framing: padding, aspect and easing (unit tested) |
 | `src/input.ts` | One control stream from the devices or the focused window |
+| `src/errors.ts` | Device failures → one `AppError` (code, headline, raw detail, fix command), pure and unit tested |
 | `src/main.ts` | PixiJS app, frame pump, mode switching, HUD |
 | `src/camera.ts` / `src/face_camera.ts` / `src/microphone.ts` | Typed bridges to the Rust commands |
 | `src-tauri/src/virtual_camera.rs` | Device discovery, RGBA → YUYV, writer thread |
@@ -625,8 +626,36 @@ The `cargo test` run includes two ignored tests that need real hardware:
 `captures_a_frame` opens the webcam (run it with `--ignored`).
 
 The HUD in the bottom-left corner shows the device, format, measured output rate
-and the microphone state. If no loopback device is available, a panel explains
-what to run.
+and the microphone state.
+
+### When a device fails
+
+Every device failure — no loopback device, a camera another program is holding,
+a microphone that will not open, a video node this user may not touch — lands in
+one panel with three parts: what is wrong in plain words, the raw message from
+the backend underneath (so a bug report can be searched for it), and the single
+command that fixes it, with a **Copy** button. Nothing puts a bare Rust string in
+front of you any more.
+
+The mapping lives in `src/errors.ts` (`classify`), is pure, and is unit-tested
+against the exact sentences the Rust side sends:
+
+| What happened | The command it offers |
+| --- | --- |
+| no `v4l2loopback` device | `sudo scripts/setup-virtual-camera.sh` |
+| the loopback or a webcam is held by another program | `sudo fuser -v /dev/video*` |
+| a video node this user cannot open | `sudo usermod -aG video $USER` |
+| the microphone will not open | `systemctl --user restart wireplumber` |
+| `VIICELL_VIDEO_DEVICE` / `VIICELL_FACE_DEVICE` pinned to a dead node | `unset …` |
+
+The panel can be dismissed; a dismissal lasts until that device recovers, so a
+failure that comes back is reported again instead of being silenced forever.
+**Try again** retries the stream.
+
+Keys are the one exception: when the app was never granted read access to
+`/dev/input`, the face still works and only the global keys do not, so that case
+is a one-line hint above the HUD with the same copyable fix
+(`sudo scripts/setup-input-access.sh`), never a panel over the canvas.
 
 ## Window behaviour
 

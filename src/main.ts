@@ -15,6 +15,7 @@ import { FaceTracking } from "./face/tracking";
 import { faceCameraStatus, nextFaceFrame, startFaceCamera, stopFaceCamera } from "./face_camera";
 import { GAZE_ANCHORS, Gaze, type GazeAnchor } from "./gaze";
 import { keysAreGlobal, startInput, subscribeInput } from "./input";
+import { classify, inputDenied, type AppError, type ErrorCode, type ErrorSource } from "./errors";
 import { LookOverlay } from "./look_overlay";
 import {
   MODE_KEY,
@@ -33,9 +34,17 @@ const canvas = document.querySelector<HTMLCanvasElement>("#output")!;
 const hud = document.querySelector<HTMLElement>("#hud")!;
 const hudText = document.querySelector<HTMLElement>("#hud-text")!;
 const errorPanel = document.querySelector<HTMLElement>("#error-panel")!;
+const errorTitle = document.querySelector<HTMLElement>("#error-title")!;
 const errorText = document.querySelector<HTMLElement>("#error-text")!;
+const errorFix = document.querySelector<HTMLElement>("#error-fix")!;
+const errorFixText = document.querySelector<HTMLElement>("#error-fix-text")!;
+const errorCopy = document.querySelector<HTMLButtonElement>("#error-copy")!;
+const errorDismiss = document.querySelector<HTMLButtonElement>("#error-dismiss")!;
 const retryButton = document.querySelector<HTMLButtonElement>("#retry")!;
 const inputHint = document.querySelector<HTMLElement>("#input-hint")!;
+const inputHintText = document.querySelector<HTMLElement>("#input-hint-text")!;
+const inputHintFix = document.querySelector<HTMLElement>("#input-hint-fix")!;
+const inputHintCopy = document.querySelector<HTMLButtonElement>("#input-hint-copy")!;
 const trackHint = document.querySelector<HTMLElement>("#track-hint")!;
 const calibrationPanel = document.querySelector<HTMLElement>("#calibration")!;
 const calibrationCount = document.querySelector<HTMLElement>("#calibration-count")!;
@@ -175,6 +184,7 @@ async function boot() {
   // Controls: read from the devices themselves while the app runs, so posing
   // the face does not need the window (or the user's attention).
   setupGazeControls();
+  fillInputHint();
   void startInput();
 
   // Two ways to pose the face, sharing one rig. Switching re-applies whichever
@@ -253,6 +263,9 @@ async function boot() {
   });
 
   retryButton.addEventListener("click", () => void connect());
+  errorCopy.addEventListener("click", () => void copyCommand(errorFixText.textContent ?? "", errorCopy));
+  errorDismiss.addEventListener("click", () => dismissProblem());
+  inputHintCopy.addEventListener("click", () => void copyCommand(inputHintFix.textContent ?? "", inputHintCopy));
   for (const button of calibrateButtons) {
     button.addEventListener("click", () =>
       startCalibration(rig, button.dataset.calibration as CalibrationKind),
@@ -340,6 +353,9 @@ async function connect() {
 
   streaming = false;
   hideError();
+  // An explicit retry is also permission to speak: a failure dismissed earlier
+  // must be able to show itself again if it is still there.
+  dismissed.clear();
   setHud("starting", "looking for a virtual camera…");
 
   // Whatever the store holds now — after boot it is the saved config.
@@ -353,7 +369,7 @@ async function connect() {
       `${info.device.label} · ${info.device.path} · ${info.width}×${info.height} ${info.pixelFormat} · ${info.fps} fps`,
     );
   } catch (error) {
-    showError(String(error));
+    showError(error);
   }
 }
 
@@ -378,7 +394,6 @@ async function refreshStatus() {
       return;
     }
 
-    hideError();
     const { device, width, height, pixelFormat } = status.info;
     const micNote =
       mouth && mouth.state !== "live"
@@ -389,11 +404,15 @@ async function refreshStatus() {
     // actually driving the face, and how the tracking camera is doing.
     const trackingMode = faceMode() === "track";
     let faceNote = "";
+    // The tracking camera outranks the microphone: it is the device the person
+    // just asked for, so its failure is the one the panel talks about.
+    let faceProblem: AppError | null = null;
     if (trackingMode) {
       try {
         const face = await faceCameraStatus();
         if (face.error) {
           faceCameraError = face.error;
+          faceProblem = classify(face.error, "face-camera");
           showTrackHint();
         }
         if (face.info) {
@@ -431,11 +450,35 @@ async function refreshStatus() {
         `${status.fps.toFixed(0)} fps · ${status.framesReceived} in · ` +
         `${status.framesDropped} dropped · ${eyes} · keys ${keys}${micNote}${faceNote}`,
     );
+
+    // The camera is healthy (the checks above returned otherwise), so whatever
+    // still deserves the panel is the tracking camera or the microphone. Last,
+    // so a failure keeps the HUD in its error colour instead of being painted
+    // over by the `live` line the healthy stream just set.
+    setPanelProblem(faceProblem ?? micProblem());
   } catch (error) {
     streaming = false;
     setHud("error", "cannot reach the camera backend");
-    showError(String(error));
+    showError(error);
   }
+}
+
+/**
+ * The microphone's current failure, if it has one.
+ *
+ * The mic is optional — without it the synth line just draws its resting bars —
+ * so a live mic clears the panel and the "already dismissed" marks with it,
+ * which is what lets a second failure be announced after a fix.
+ */
+function micProblem(): AppError | null {
+  if (!mouth) return null;
+  if (mouth.state === "live") {
+    dismissed.delete("mic_missing");
+    dismissed.delete("mic_denied");
+    return null;
+  }
+  if (mouth.state === "unavailable" && mouth.error) return classify(mouth.error, "mic");
+  return null;
 }
 
 function setHud(state: HudState, text: string) {
@@ -445,6 +488,8 @@ function setHud(state: HudState, text: string) {
 
 function applyModeUi(mode: FaceMode) {
   document.body.dataset.mode = mode;
+  // A failure dismissed in one mode should be allowed to speak in the other.
+  dismissed.clear();
   modeName.textContent = mode === "track" ? "facial track" : "manual";
   modeRow?.classList.toggle("active", mode === "track");
   leanRow?.classList.remove("active");
@@ -477,6 +522,9 @@ async function beginTracking(rig: FaceRig) {
   const [camera, model] = await Promise.allSettled([startFaceCamera(), tracker.start()]);
   if (camera.status === "rejected") {
     faceCameraError = String(camera.reason);
+    // The webcam is the device the person just asked for, so its failure gets
+    // the panel — with the command that frees it — not just the small hint.
+    showError(camera.reason, "face-camera");
   } else if (model.status === "rejected") {
     faceCameraError = tracker.error ?? String(model.reason);
   }
@@ -797,14 +845,117 @@ async function pumpTracking() {
   }
 }
 
-function showError(message: string) {
-  errorText.textContent = message;
+/**
+ * The failure the panel is showing, and the codes this person has waved away.
+ *
+ * One slot: the panel never stacks, and a problem that persists does not repaint
+ * every poll (`setPanelProblem` returns early on an unchanged error). Dismissing
+ * is per code and only until the device recovers — a fixed mic that breaks again
+ * gets to say so once more.
+ */
+let panelProblem: AppError | null = null;
+const dismissed = new Set<ErrorCode>();
+
+function setPanelProblem(next: AppError | null) {
+  if (next !== null && dismissed.has(next.code)) {
+    if (panelProblem !== null) {
+      panelProblem = null;
+      errorPanel.hidden = true;
+    }
+    return;
+  }
+  if (
+    panelProblem !== null &&
+    next !== null &&
+    panelProblem.code === next.code &&
+    panelProblem.detail === next.detail
+  ) {
+    return;
+  }
+  panelProblem = next;
+  if (next === null) {
+    errorPanel.hidden = true;
+    errorPanel.removeAttribute("data-code");
+    return;
+  }
+
+  errorTitle.textContent = next.message;
+  errorText.textContent = next.detail;
+  errorPanel.dataset.code = next.code;
+  // The one action the ticket promises: the command, ready to copy. Failures
+  // whose fix is "plug a device in" have none, and then there is no row.
+  const fix = next.fix ?? "";
+  errorFix.hidden = fix.length === 0;
+  errorFixText.textContent = fix;
+  errorCopy.textContent = "Copy";
   errorPanel.hidden = false;
-  setHud("error", "virtual camera unavailable");
+  setHud("error", next.message);
+}
+
+/** Classifies whatever a `catch` caught and shows it. Never a raw string. */
+function showError(error: unknown, source: ErrorSource = "camera") {
+  setPanelProblem(classify(error, source));
 }
 
 function hideError() {
+  if (panelProblem !== null) dismissed.delete(panelProblem.code);
+  setPanelProblem(null);
+}
+
+/**
+ * Hides the panel until that failure changes.
+ *
+ * The status poll runs every second, so an un-suppressed panel would be pushed
+ * straight back up; dismissal is per code and a device that recovers clears the
+ * mark (see `micProblem`), so a later failure is never swallowed.
+ */
+function dismissProblem() {
+  if (panelProblem !== null) dismissed.add(panelProblem.code);
+  panelProblem = null;
   errorPanel.hidden = true;
+}
+
+/**
+ * Fills the window-only-keys hint from the same taxonomy the panel uses.
+ *
+ * It stays a hint rather than an error: posing the face still works here, only
+ * the global part does not, so this must never cover the canvas.
+ */
+function fillInputHint() {
+  const problem = inputDenied();
+  inputHintText.textContent = problem.message;
+  inputHintFix.textContent = problem.fix ?? "";
+  inputHintFix.hidden = problem.fix === undefined;
+  inputHintCopy.hidden = problem.fix === undefined;
+}
+
+/** Copies a fix command, then says so on the button for a moment. */
+async function copyCommand(text: string, button: HTMLButtonElement) {
+  if (text.length === 0) return;
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    copied = true;
+  } catch {
+    // A webview can refuse the async clipboard; the selection path still copies.
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.append(area);
+    area.select();
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+    area.remove();
+  }
+  button.textContent = copied ? "Copied" : "Copy failed";
+  window.setTimeout(() => {
+    button.textContent = "Copy";
+  }, 1200);
 }
 
 type EyePart = "brows" | "cheeks" | "eyes";

@@ -155,3 +155,63 @@ changed, what was verified and how, what was NOT verified.
   with a screen must run `bun run tauri dev` and confirm: a live HUD line, a
   camera that starts on retry, `T`/`G`/`Z`+wheel still posing, and a mouth
   calibration that opens and closes the panel with the preview inside it.
+
+## 2026-10-29 — session 4 — VF-010 layout shell
+
+* **Changed**: the window is two columns now. `index.html` grew `#panel` (a
+  `.dock` aside: head with `#panel-toggle`, body with the camera preview, the
+  calibration presets and the key map, foot with `#hud`, `#input-hint` and
+  `#track-hint`). Nothing chrome-ish is a child of the body any more except the
+  look overlay, the calibration dialog and the error panel, which are overlays
+  on purpose.
+  * `src/layout.ts` (new, 181) — `layoutFor(window, {width, collapsed})` returns
+    `panel`, `stage`, `view`, `safe`, `content` and the whole-number `unit`;
+    `panelColumn` caps the column at 42% of the usable width, floors it at 240
+    px and 200 px of content; `letterbox` gives the largest 16×9·k centred in
+    an area; `safeArea` insets the canvas by 6% of its short side. No DOM, no
+    timer, one output.
+  * `src/layout.test.ts` (new, 157) — 29 tests, the acceptance sizes as
+    `describe`s: view inside the stage, never under the panel, `16·unit ×
+    9·unit`, safe area inside the view and disjoint from panel/content, content
+    ≥ 200 px, fold grows the stage and the view, 1000×1000 keeps 16:9, a
+    remembered width is clamped both ways, 120×90 and 0×0 do not go negative.
+  * `src/settings.ts` — `PanelSettings` (`width`, `collapsed`), `LIMITS.panel`
+    (240–420), `DEFAULT_SETTINGS.panel` (320, open), merging + `SettingsPatch`
+    + the partial merge inside `set()` so `{collapsed}` cannot reset a
+    remembered width. `src/settings.test.ts` — 3 new: clamp/reject-non-boolean
+    at merge level, and a fold→reload round trip through the store.
+  * `src/shell.ts` (349) — `panelToggle`, `panelBody`, `installLayout(state)`
+    (paints `--panel-width`, `--view-x/y/w/h`, the `folded` body class and
+    `aria-expanded`, repaints on `resize`) and `relayout()`;
+    `closeCalibrationPanel` now prepends the preview back into the dock.
+  * `src/styles.css` — `#stage` is `inset: 0 var(--panel-width) 0 0`, `#output`
+    is absolutely placed at the painted rect, `.dock`/`.dock-head`/`.dock-body`
+    (scrolling)/`.dock-foot`, `body.folded` hides the body and the title and
+    leaves the toggle plus a dot-only HUD. HUD, hints, guide and presets lost
+    their `position: fixed` and their blurs; the calibration dialog centres over
+    the stage instead of the bottom of the window.
+  * `src/main.ts` (243) — one line installs the layout
+    (`installLayout(() => settings.value("panel"))`); `wireButtons()` grew the
+    fold handler (store first, then `relayout()`), and the browser preview calls
+    `wireButtons()` too, so the fold is testable without Tauri.
+  * `README.md` — new "The window" section, `layout.ts` in the file map, and the
+    four sentences that still said "bottom-left HUD" / "side panels step out of
+    the way" / "hint above the HUD" corrected.
+* **Verified**: `scripts/check.sh` → CHECK GREEN (`tsc --noEmit`; `bun test`
+  261 pass across 14 files, 31 new; `vite build`; `cargo test --lib`; `cargo
+  check`). Windows gate still SKIP. **And, for the first time since VF-004, the
+  layout was looked at in a real Chromium**: `vite preview` + CDP at 640×360,
+  1280×720, 1920×1080 and 1000×1000 — view 352×198, 928×522, 1568×882,
+  656×369 (all 16·k × 9·k), every chrome rect inside the panel column, no
+  overlap with the canvas; the fold took the column 320→44 px and the view
+  928×522→1200×675, `aria-expanded` true→false, second click restored it
+  exactly. A screenshot at 1280×720 shows the letterboxed face left and the
+  dock right with nothing over the canvas.
+* **Not verified**: `bun run tauri dev` was still not run — the browser preview
+  has no Tauri bridge, so nothing here proves the frame pump still reaches
+  `/dev/video10` at the new size (the pump is untouched, but that is an argument,
+  not a measurement). Also unverified on a real X11/Wayland window: the dock at
+  a 640×360 *window* (only the browser viewport was resized) and the calibration
+  dialog at its new centred position. At 640×360 the dock body scrolls (271 px
+  visible of 438): 14 key rows cannot fit in 360 px, so the key map scrolls
+  rather than being clipped by anything — VF-014 removes it anyway.

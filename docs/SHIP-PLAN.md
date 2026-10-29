@@ -37,7 +37,7 @@ Ticket format: **goal** — *acceptance* (the thing that must be true) — files
 
 ## Phase B — interface rework (the reason for this project pass)
 
-- [ ] **VF-010 layout shell** — stage + docked panel, canvas letterboxed with
+- [x] **VF-010 layout shell** — stage + docked panel, canvas letterboxed with
   integer-ish scaling (no half-pixels), 16:9 kept in any window shape, panel
   collapsible with a remembered width. Kill the bleed/overlap layout where
   HUD, hints, guide and calibration all float over the canvas.

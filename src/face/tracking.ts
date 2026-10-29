@@ -29,12 +29,35 @@ const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
  * The first is head lean, which the eyes amplify; the gaze itself stays light
  * enough to answer a real glance.
  */
-const HEAD_DEAD = 0.035;
-const GAZE_DEAD = 0.025;
+const HEAD_DEAD = 0.045;
+/**
+ * Head turn is read from the nose, which is steadier than the head's place in
+ * the frame, but it is a difference of two landmarks and needs a wider floor.
+ */
+const HEAD_TURN_DEAD = 0.07;
+const GAZE_DEAD = 0.04;
 const EXPRESSION_DEAD = 0.06;
 const BLINK_DEAD = 0.06;
+/** The lid gap is small, so its noise is amplified when it drives the eye size. */
+const EYE_WIDE_DEAD = 0.1;
+/**
+ * The eye-wide blendshape above which the gaze and head lean hold still, and the
+ * lower value that lets them follow again. A wide-eyed expression distorts the
+ * landmarks the gaze is measured from; the hold keeps the pupils pointing where
+ * they were while the iris size still answers the bulge.
+ */
+const BULGE_HOLD_ON = 0.45;
+const BULGE_HOLD_OFF = 0.2;
+/** Score wobble ignored when deciding whether to hold. */
+const BULGE_SCORE_DEAD = 0.05;
 /** The jaw has no range dead zone of its own, so only real noise is dropped. */
 const MOUTH_DEAD = 0.01;
+/**
+ * Mouth place and twist are small, slow movements; a larger dead zone keeps the
+ * whole mouth from trembling on a still face, while a deliberate shift still
+ * clears it. The filter then follows the move without lagging behind it.
+ */
+const MOUTH_POSE_DEAD = 0.08;
 
 /**
  * The tracked signals read 0 at rest; the rig's mouth starts at `MOUTH.rest`.
@@ -58,9 +81,19 @@ interface FilterOptions {
 }
 
 /** Slower at rest than the old fixed easings, and closer to them under motion. */
-const HEAD_FILTER: FilterOptions = { minCutoff: 0.9, beta: 1.8, derivativeCutoff: 1 };
-const GAZE_FILTER: FilterOptions = { minCutoff: 1.4, beta: 2.6, derivativeCutoff: 1 };
+const HEAD_FILTER: FilterOptions = { minCutoff: 0.7, beta: 1.2, derivativeCutoff: 0.8 };
+/**
+ * The camera-mode look is measured from the iris, which is a pixel-accurate but
+ * jittery landmark, and the fitted map amplifies it. This filter is therefore
+ * steadier than the manual gaze one, with a low speed boost so the jitter does
+ * not wake it up.
+ */
+const GAZE_FILTER: FilterOptions = { minCutoff: 0.6, beta: 0.8, derivativeCutoff: 0.7 };
 const EXPRESSION_FILTER: FilterOptions = { minCutoff: 0.9, beta: 1.2, derivativeCutoff: 1 };
+/** The lid gap is small; a slower filter keeps the iris and pupil size still. */
+const EYE_WIDE_FILTER: FilterOptions = { minCutoff: 0.6, beta: 0.6, derivativeCutoff: 1 };
+/** The hold must engage as the bulge appears, so this gate is quick. */
+const BULGE_FILTER: FilterOptions = { minCutoff: 2.5, beta: 3, derivativeCutoff: 2 };
 /** Speech moves the jaw quickly, so it gets a faster filter than the expressions. */
 const JAW_FILTER: FilterOptions = { minCutoff: 3, beta: 4, derivativeCutoff: 2 };
 /** How much of the lid motion the brows and cheeks take, per eye. */
@@ -204,8 +237,12 @@ function responsiveness(cutoff: number, dt: number): number {
 const NEUTRAL: FaceSample = {
   x: 0,
   y: 0,
+  headYaw: 0,
+  headPitch: 0,
   blinkLeft: 0,
   blinkRight: 0,
+  eyeWide: 0,
+  eyeWideScore: 0,
   lookX: 0,
   lookY: 0,
   cheekLeft: 0,
@@ -214,6 +251,10 @@ const NEUTRAL: FaceSample = {
   browRight: 0,
   mouthOpen: 0,
   mouthWidth: 0,
+  mouthPucker: 0,
+  mouthShiftX: 0,
+  mouthShiftY: 0,
+  mouthTilt: 0,
   mouthBottomWidth: 0,
   mouthHappyLeft: 0,
   mouthHappyRight: 0,
@@ -227,9 +268,15 @@ export class FaceTracking {
   #pose: FaceSample = { ...NEUTRAL };
   #left = blinkState();
   #right = blinkState();
+  /** True while a bulge holds the gaze and head lean in place. */
+  #bulgeHold = false;
   #filters = {
     x: new PoseFilter(HEAD_FILTER),
     y: new PoseFilter(HEAD_FILTER),
+    headYaw: new PoseFilter(HEAD_FILTER),
+    headPitch: new PoseFilter(HEAD_FILTER),
+    eyeWide: new PoseFilter(EYE_WIDE_FILTER),
+    eyeWideScore: new PoseFilter(BULGE_FILTER),
     lookX: new PoseFilter(GAZE_FILTER),
     lookY: new PoseFilter(GAZE_FILTER),
     cheekLeft: new PoseFilter(EXPRESSION_FILTER),
@@ -238,6 +285,10 @@ export class FaceTracking {
     browRight: new PoseFilter(EXPRESSION_FILTER),
     mouthOpen: new PoseFilter(JAW_FILTER),
     mouthWidth: new PoseFilter(EXPRESSION_FILTER),
+    mouthPucker: new PoseFilter(EXPRESSION_FILTER),
+    mouthShiftX: new PoseFilter(EXPRESSION_FILTER),
+    mouthShiftY: new PoseFilter(EXPRESSION_FILTER),
+    mouthTilt: new PoseFilter(EXPRESSION_FILTER),
     mouthBottomWidth: new PoseFilter(JAW_FILTER),
     mouthHappyLeft: new PoseFilter(EXPRESSION_FILTER),
     mouthHappyRight: new PoseFilter(EXPRESSION_FILTER),
@@ -251,6 +302,11 @@ export class FaceTracking {
     this.#targetAt = performance.now();
   }
 
+  /** The eased pose last written to the rig, for readouts that mirror it. */
+  get pose(): Readonly<FaceSample> {
+    return this.#pose;
+  }
+
   /** Advances the smoothing and writes the pose to the rig. */
   update(rig: FaceRig, dt: number, origin: ScreenPoint = SCREEN_CENTRE): void {
     const now = performance.now();
@@ -258,10 +314,30 @@ export class FaceTracking {
     const seconds = Math.max(dt, 0);
     const filters = this.#filters;
 
-    this.#pose.x = filters.x.filter(deadZone(live.x, HEAD_DEAD), seconds);
-    this.#pose.y = filters.y.filter(deadZone(live.y, HEAD_DEAD), seconds);
-    this.#pose.lookX = filters.lookX.filter(deadZone(live.lookX, GAZE_DEAD), seconds);
-    this.#pose.lookY = filters.lookY.filter(deadZone(live.lookY, GAZE_DEAD), seconds);
+    // A wide-eyed expression moves the landmarks the gaze and the head lean are
+    // measured from. While the eye-wide blendshape is high, those channels hold
+    // the last good value: a bulge changes the iris size, not the direction.
+    this.#pose.eyeWideScore = filters.eyeWideScore.filter(
+      deadZone(live.eyeWideScore, BULGE_SCORE_DEAD),
+      seconds,
+    );
+    if (this.#pose.eyeWideScore > BULGE_HOLD_ON) {
+      this.#bulgeHold = true;
+    } else if (this.#pose.eyeWideScore < BULGE_HOLD_OFF) {
+      this.#bulgeHold = false;
+    }
+
+    if (!this.#bulgeHold) {
+      this.#pose.x = filters.x.filter(deadZone(live.x, HEAD_DEAD), seconds);
+      this.#pose.y = filters.y.filter(deadZone(live.y, HEAD_DEAD), seconds);
+      this.#pose.headYaw = filters.headYaw.filter(deadZone(live.headYaw, HEAD_TURN_DEAD), seconds);
+      this.#pose.headPitch = filters.headPitch.filter(
+        deadZone(live.headPitch, HEAD_TURN_DEAD),
+        seconds,
+      );
+      this.#pose.lookX = filters.lookX.filter(deadZone(live.lookX, GAZE_DEAD), seconds);
+      this.#pose.lookY = filters.lookY.filter(deadZone(live.lookY, GAZE_DEAD), seconds);
+    }
     this.#pose.cheekLeft = filters.cheekLeft.filter(
       deadZone(live.cheekLeft, EXPRESSION_DEAD),
       seconds,
@@ -278,6 +354,22 @@ export class FaceTracking {
     this.#pose.mouthOpen = filters.mouthOpen.filter(deadZone(live.mouthOpen, MOUTH_DEAD), seconds);
     this.#pose.mouthWidth = filters.mouthWidth.filter(
       deadZone(live.mouthWidth, EXPRESSION_DEAD),
+      seconds,
+    );
+    this.#pose.mouthPucker = filters.mouthPucker.filter(
+      deadZone(live.mouthPucker, EXPRESSION_DEAD),
+      seconds,
+    );
+    this.#pose.mouthShiftX = filters.mouthShiftX.filter(
+      deadZone(live.mouthShiftX, MOUTH_POSE_DEAD),
+      seconds,
+    );
+    this.#pose.mouthShiftY = filters.mouthShiftY.filter(
+      deadZone(live.mouthShiftY, MOUTH_POSE_DEAD),
+      seconds,
+    );
+    this.#pose.mouthTilt = filters.mouthTilt.filter(
+      deadZone(live.mouthTilt, MOUTH_POSE_DEAD),
       seconds,
     );
     this.#pose.mouthBottomWidth = filters.mouthBottomWidth.filter(
@@ -307,17 +399,20 @@ export class FaceTracking {
     stepBlink(this.#right, deadZone(live.blinkRight, BLINK_DEAD), seconds);
     this.#pose.blinkLeft = this.#left.value;
     this.#pose.blinkRight = this.#right.value;
+    this.#pose.eyeWide = filters.eyeWide.filter(deadZone(live.eyeWide, EYE_WIDE_DEAD), seconds);
 
     const { blinkLeft, blinkRight, cheekLeft, cheekRight, browLeft, browRight } = this.#pose;
-    const { x, y, lookX, lookY } = this.#pose;
+    const { x, y, headYaw, headPitch, lookX, lookY } = this.#pose;
     // The tracked gaze is already in monitor terms, so the corner origin does
     // the same thing it does to the cursor: it moves where the face stands, not
     // where it is looking.
     const look = fromOrigin({ u: 0.5 + lookX / 2, v: 0.5 + lookY / 2 }, origin);
-    rig.setHead(x, y);
+    rig.setHead(x, y, headYaw, headPitch);
     rig.setTrackedLook(look.u * 2 - 1, look.v * 2 - 1);
     rig.setEyeClose(blinkLeft, "left");
     rig.setEyeClose(blinkRight, "right");
+    // A bulge shrinks the iris and thins the pupil on top of the manual sizes.
+    rig.setEyeWide(this.#pose.eyeWide);
     // A blink drags the brows down a little, and lowering the brows does the
     // rest; a raised cheek stretches its band and lifts its outer end.
     rig.setBrowClose(clamp01(blinkLeft * BLINK_BROW + browLeft * TRACKED_BROW_RANGE), "left");
@@ -327,13 +422,13 @@ export class FaceTracking {
     rig.setCheekLift((cheekLeft + cheekRight) / 2);
 
     // The tracker reads the mouth from 0 at rest; every channel travels from
-    // the rest pose in both directions. A smile widens towards the Max width and
-    // a frown narrows towards the Min one, the way the supplied Happiness and
-    // Sadness references pair width with the expression.
+    // the rest pose in both directions. A smile widens towards the Max width,
+    // while a frown or rounded lips ("o"/"u") narrow towards the Min one.
     const rest = MOUTH.rest;
     rig.setMouthOpen(rest.open + (1 - rest.open) * this.#pose.mouthOpen);
     const sad = Math.max(this.#pose.mouthSadLeft, this.#pose.mouthSadRight);
-    const stretch = this.#pose.mouthWidth - sad;
+    const narrow = Math.max(sad, this.#pose.mouthPucker);
+    const stretch = this.#pose.mouthWidth - narrow;
     rig.setMouthWidth(
       stretch >= 0
         ? rest.width + (1 - rest.width) * stretch
@@ -347,6 +442,10 @@ export class FaceTracking {
       "right",
       this.#cornerOf(this.#pose.mouthHappyRight, this.#pose.mouthSadRight),
     );
+    // The mouth travels and twists as a whole, around its own centre: a move is
+    // a translation of the lips together, not a swing from the middle of the
+    // face, so the corners never angle towards the nose.
+    rig.setMouthPose(this.#pose.mouthShiftX, this.#pose.mouthShiftY, this.#pose.mouthTilt);
   }
 
   /** A smile lifts a corner, a frown cuts it down, both from the rest pose. */
@@ -354,18 +453,20 @@ export class FaceTracking {
     return Math.min(1, Math.max(-1, MOUTH.rest.corner + CORNER_RANGE * happy - SAD_RANGE * sad));
   }
 
-  /** Drops back to an open, centred face and writes it once. */
+  /** Drops back to a shut, centred face and writes it once. */
   reset(rig: FaceRig): void {
     this.#target = null;
     this.#pose = { ...NEUTRAL };
     this.#left = blinkState();
     this.#right = blinkState();
+    this.#bulgeHold = false;
     for (const filter of Object.values(this.#filters)) {
       filter.reset();
     }
     rig.setHead(0, 0);
     rig.setLook(0, 0);
     rig.setEyeClose(0);
+    rig.setEyeWide(0);
     rig.setBrowClose(0);
     rig.setCheekClose(0);
     rig.setCheekLift(0);

@@ -131,15 +131,19 @@ export const MOUTH = {
   },
 
   /**
-   * Resting pose: a neutral, slightly open mouth with its corners showing. The
-   * reference extremes are reached from here in both directions: a smile widens
-   * to the Max width and a frown narrows to the Min width, so the tiny Min mouth
-   * is an expression rather than the default face.
+   * Resting pose: a neutral, shut mouth with its corners showing. The reference
+   * extremes are reached from here in both directions: a smile widens to the Max
+   * width and a frown narrows to the Min width, so the tiny Min mouth is an
+   * expression rather than the default face.
+   *
+   * `open` is 0 — the shut end of the range — so a relaxed face reads as a closed
+   * mouth. The eased open curve lifts it well off the shut reference with the
+   * first small bit of jaw travel, so rest does not cost any responsiveness.
    *
    * `bottomWidth` 0.33587786 is a lower lip of exactly the default width: the
    * rig maps 0..1 onto 0.692..1.609, and (1 - 0.692) / (1.609 - 0.692) is that.
    */
-  rest: { open: 0.2, width: 0.5, bottomWidth: 0.33587786, corner: 0.5 },
+  rest: { open: 0, width: 0.5, bottomWidth: 0.33587786, corner: 0.5 },
 } as const;
 
 export interface ShapeDef {

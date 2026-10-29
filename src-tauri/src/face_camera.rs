@@ -36,8 +36,10 @@ const SYSFS_VIDEO_CLASS: &str = "/sys/class/video4linux";
 /// frame buys no accuracy — it only costs USB bandwidth and decode time.
 pub const WIDTH: u32 = 640;
 pub const HEIGHT: u32 = 480;
-/// Frames per second the camera is asked for. The tracker consumes fewer.
-pub const FPS: u32 = 15;
+/// Frames per second the camera is asked for. The tracker runs the landmark
+/// model on every new frame, so this is the sampling rate of the mouth and
+/// eyelids: fast enough to catch the peaks of speech rather than skipping them.
+pub const FPS: u32 = 30;
 
 /// How long `start` waits for the device to open and start streaming.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(6);

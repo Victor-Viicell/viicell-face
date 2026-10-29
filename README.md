@@ -15,7 +15,7 @@ both.
 ```mermaid
  graph LR
     M["microphone<br/>cpal"] -->|"waveform, ~50/s"| F["PixiJS face rig"]
-    C["webcam<br/>native MJPG capture"] -->|"JPEG frames, 15/s"| T["MediaPipe FaceLandmarker<br/>in the webview"]
+    C["webcam<br/>native MJPG capture"] -->|"JPEG frames, 30/s"| T["MediaPipe FaceLandmarker<br/>in the webview"]
     T -->|"head · blink · gaze"| F
     F -->|"1280x720 RGBA<br/>raw IPC body"| B["Rust: RGBA to YUYV"]
     B -->|"mmap write"| V["/dev/videoN<br/>v4l2loopback"]
@@ -32,10 +32,11 @@ both.
 | `src/face/rig.ts` | Builds the PixiJS scene from those maps, exposes bones, skeleton overlay |
 | `src/face/mouth.ts` | The mic-driven spectrum mouth |
 | `src/gaze.ts` | Where the eyes look: the cursor and the pinned screen origin |
+| `src/look_overlay.ts` | The full-monitor gaze crosshair and the calibration marks (DOM, never in the output frames) |
 | `src/anchor.ts` | The screen origin shared by the cursor and camera modes (unit tested) |
 | `src/mode.ts` | Which pose source is in charge: manual or facial track |
 | `src/face/tracker.ts` | MediaPipe FaceLandmarker wrapper, calibration collection |
-| `src/face/calibration.ts` | The step-by-step calibration: seven poses, each a median or a cursor trace (unit tested) |
+| `src/face/calibration.ts` | The step-by-step calibration: three presets of poses, each held and reduced to a median (unit tested) |
 | `src/face/landmarks.ts` | Landmarks → head/blink/gaze maths (no runtime dependency, unit tested) |
 | `src/face/lowlight.ts` | Local brightness lift for a dim frame before the model reads it (unit tested) |
 | `src/face/tracking.ts` | Eases tracked readings onto the rig every frame |
@@ -72,7 +73,7 @@ transforms are the identity and the shapes line up with the source artwork.
 | `eyeLeftPupil` / `eyeRightPupil` | iris centre | Light slit; scaling X dilates it |
 | `browLeft` / `browRight` | inner end, y 155.282 | Upper slash; stretched down it becomes a lid |
 | `cheekLeft` / `cheekRight` | inner end, y 680.174 | Lower slash; stretched up it becomes a lid |
-| `mouth` | 960, 760 | Root of the mouth; scales the whole mouth for width |
+| `mouth` | 960, 760 | Root of the mouth; scales it for width, and carries the tracked shift and twist about its own centre |
 | `mouthBottom` | 960, 501.102 | Lower lip; scaling Y opens it, scaling X widens it |
 | `mouthTop` | 960, 760 | Upper lip and fangs, over the lower lip |
 | `mouthGap` | 960, 760 | The dark cut between the lips, owned by a bone so the mask can be rebuilt |
@@ -96,6 +97,7 @@ rig.setMouthWidth(0.5);    // 0 the narrow reference, 1 the wide one
 rig.setMouthBottomWidth(0.5);
 rig.setMouthCorner("left", 0.5);  // -1 sad cut, 0 flat happy cut, 1 no cut
 rig.setMouthCorner("right", -0.5);
+rig.setMouthPose(0.3, -0.2, 0.4); // -1..1 shift right/down, -1..1 twist clockwise
 rig.resetMouth();         // back to the resting mouth
 rig.rest();               // every bone back to rest
 ```
@@ -123,10 +125,10 @@ nothing at the happiest pose and grow into the round disc of the Sadness
 references. The lower lip's extra width fades in with the opening, so a nearly
 shut mouth cannot push a wide lip past the gap's corner arms, where the excess
 would show above the upper line. Every cut is transparent, so the mouth blends
-with whatever backdrop is behind it. The rest pose is a neutral, slightly open
-mouth with its corners showing: a smile widens it towards `MaxMouthWidth` and a
-frown narrows it towards `MinMouthWidth`, so the tiny narrow mouth is an
-expression rather than the default face, and the corners are visible at rest.
+with whatever backdrop is behind it. The rest pose is a neutral, shut mouth
+with its corners showing: a smile widens it towards `MaxMouthWidth` and a frown
+narrows it towards `MinMouthWidth`, so the tiny narrow mouth is an expression
+rather than the default face, and the corners are visible at rest.
 
 Gradients are described in shape-local space (`paint.ts`), so one description
 paints both mirrored eyes and follows a pupil as it is scaled. The cached
@@ -145,7 +147,8 @@ so it never shows up in the camera feed.
 Press **T** to show the tracking camera instead: the exact frame the landmarker
 last read, with the face mesh, both lids, the irises, the brows and the lips drawn
 over it, and a readout of what came out of it — per-eye blink score and lid gap,
-gaze, lean, cheek raise, mouth open/width, happy and sad at each corner, brows, and
+eye-wide, gaze, lean, head turn, cheek raise, mouth open/width/pucker, shift/tilt,
+happy and sad at each corner, brows, and
 how the calibration stands.
 Each lid is tinted by its closure (mint open, amber half, red shut) so a wink is
 unmistakable, and the iris dots are where the model thinks the pupils are. The
@@ -175,10 +178,13 @@ discoverable without this file:
 | `L` | lower lip | wider | narrower | back to rest |
 | `H` | mouth corners | happier | sadder | back to rest |
 | `M` | mode | | | switch manual ↔ facial track |
-| `R` | tracking | | | run the calibration · retry the camera |
+| `R` | tracking | | | mouth calibration · retry the camera |
+| `T` | tracking | | | camera preview with landmarks |
+| `G` | tracking | | | gaze crosshair over the whole monitor |
 
 `M` and `R` only do their thing in the mode they belong to: `M` is always
-available, `R` recalibrates while tracking. The four mouth keys are manual-only;
+available, `R` re-runs the mouth calibration while tracking (the eyes and
+pupils have their own buttons). The four mouth keys are manual-only;
 in `mode track` the mouth belongs to the tracker. `N`/`J`/`L`/`H` are useful for
 checking the rig against the reference SVGs without a camera: scroll `N` to the
 bottom for the Min mouth and the top for the Max one, and scroll `H` between the
@@ -209,6 +215,12 @@ Every key needs a side button held — either of the mouse's extra buttons. That
 what keeps the face out of the way: without one, `z`, `1` or `d` typed on the
 desktop behave exactly as they always did. Releasing the side button mid-pose
 finishes it, so nothing is left held.
+
+`G` puts the window in fullscreen and draws a crosshair at the monitor point the
+tracker believes the eyes are looking at — the quickest way to tell whether the
+gaze map is working. The window goes back to its old size when it is pressed
+again. It has nothing to show in manual mode, where the pupils follow the
+cursor.
 
 Closing the brows stretches their lower edge down to the bottom of the eyes;
 closing the cheeks stretches their upper edge up to the top of the eyes;
@@ -250,13 +262,15 @@ the middle of the screen is below and to the side of it. The HUD names the origi
 in both modes (`eyes camera·top left`).
 
 Each pupil slides as far as its own shell allows, and past it: 40% further left
-and right, 2.4× further up and down, because the disc already fills most of the
+and right, 5× further up and down, because the disc already fills most of the
 eye's height and its own rim would leave an upward look reading as barely a
 glance. The mask trims the excess, so the pupil presses against the edge instead
 of stopping short of it. The blue eye reaches further outward than inward, so the
 two pupils do not keep a constant distance from each other: the eye on the side
 the face is looking towards travels further, which is what makes the direction
-read at a glance. A grown iris has less room, so it travels less.
+read at a glance. The travel is measured once, for the iris as drawn, so resizing
+the iris by hand or with a bulge does not change where a given look lands on the
+screen; the shell mask trims whatever a large disc spills past the edge.
 
 A look also turns the eye itself: each assembly shifts by up to 16% of its
 shell's half-width, or 7.5% of its half-height, in the direction of the glance.
@@ -278,9 +292,14 @@ Tap `M` (with a mouse side button held) to switch to `mode track`. The app then
 opens the webcam, runs MediaPipe's FaceLandmarker on its frames and poses the
 face from what it sees:
 
-* **lean** — the midpoint of the outer eye corners, relative to the position
-  captured during calibration, leans the eyes and carries the brows and cheeks
-  at 70% so they do not cut into a leaning shell;
+* **lean** — the eye moves as a whole (shell, iris and pupil) from three
+  independent parts: where the gaze points, where the middle of the eye line
+  sits in the frame against its pose during calibration, and how far the head
+  itself is turned — the nose against the eye line, which reads a side-to-side
+  turn or a nod even while the pupils stay centred. The middle of the eye line
+  is the anchor rather than the nose bridge because opening the eyes wide lifts
+  the brows, which drags the bridge up and used to push the whole eye down. The
+  brows and cheeks follow at 70% so they do not cut into a leaning shell;
 * **blink** — each lid follows its own eye, and two measures are combined: the
   `eyeBlink` blendshape and the geometric gap between the upper and lower lid.
   Both are normalised against the *open* and *shut* poses measured during
@@ -293,80 +312,141 @@ face from what it sees:
   open eye outline even with the lids together. A score that sits well behind the
   other eye's is ignored, because MediaPipe lifts both during a wink; that is what
   lets a wink close one eye and leave the other open. A reading past 70% is taken
-  all the way shut and held for ~110 ms before opening slowly: at 15 fps the peak
-  frame lands mid-blink and the score drops again before the lids are actually
+  all the way shut and held for ~110 ms before opening slowly: at 30 fps the
+  peak frame still lands mid-blink and the score drops again before the lids are
+  actually
   back up. A frown presses the upper lid down a little, which both measures pick
   up; that share of the brow movement is taken back off the closure (fading out
   as the eye shuts), so frowning does not read as half-closed eyes and a blink
-  made while frowning still reaches fully shut. The lids drag their brow and
-  cheek along;
-* **brows** — `browDownLeft/Right` lower each brow towards its eye, so a frown
-  reads even when the eyelids are still. From the camera the band stops halfway
-  across the eye: the manual keys keep their full travel, but a frown should
-  lower the brow, not hide the eye;
+  made while frowning still reaches fully shut. If the measured shut pose ended
+  up too close to the open one — a skipped step, or a neutral re-measured after
+  the eyes run — that lid falls back to a typical open-to-shut span instead of
+  silently never closing. The lids drag their brow and cheek along;
+* **brows** — each brow is measured as its ridge height above its own eye line,
+  in eye widths, so a frown reads even when the eyelids are still. The model's
+  `browDown` score is not used: it also answers to the upper lid, so looking up
+  or down brought the lid nearer the brow and closed the bands over the eyes.
+  The ridge and the corners are both on the skull, so a glance cannot move them.
+  From the camera the band stops halfway across the eye: the manual keys keep
+  their full travel, but a frown should lower the brow, not hide the eye;
 * **cheeks** — each cheek follows the cheek itself: the `cheekSquintLeft/Right`
   raise is combined with the mouth corner on the same side and the stronger wins.
   That is what lets a smile with the eyes move the cheek bands, and a one-sided
   grin move only its cheek; the mouth corner stays in as the fallback for faces
   where the model's cheek score stays low.
+* **eye bulge** — opening the eyes past their baseline (the `eyeWide` score, or
+  a lid gap wider than the open reference the calibration saw) shrinks the iris
+  towards 70% of its drawn size and thins the pupil slit towards half width. It
+  is a tracked channel of its own: the shrink rides on top of whatever size
+  `V`/`B` picked. While the eye-wide blendshape is high, the gaze and head lean
+  hold their last value, because a wide-eyed expression distorts the landmarks
+  they are measured from; a bulge changes the iris and pupil size, never where
+  the eyes are pointing;
 * **mouth** — `jawOpen` drops the lower lip behind the upper one, the smile
   widens the mouth and the lower lip, and each mouth corner follows its own
   smile and frown: a smile lifts that corner out of its cut, a frown grows the
   cut until the end of the smile is a flat, round sad corner while narrowing the
   whole mouth towards the Min width. The jaw maps straight from the measured
-  neutral with no range dead zone, so the first small opening already moves the
-  lip. The smile is measured against the same wide-smile pose as the cheeks, the
-  frown against the sad pose, and the jaw against the wide-open pose, so all
-  three fit this person's range. Until a range is measured — or when the measured
-  one is too flat to trust — the mouth falls back on a fixed span, so it moves on
-  the first tracked frame instead of waiting for a calibration. A smile wins over
-  a frown reported on the same side;
+  neutral, ignores a small rest floor so landmark noise cannot tremble a shut
+  mouth, and is scaled to the wide-open pose that was measured, so a share of
+  this person's own range opens the mouth progressively. That share maps
+  straight through, and the rig's own eased open curve lifts small openings off
+  the shut pose while a wider jaw keeps opening the mouth further. The
+  inner-lip gap is measured against its resting value as a second opening, so a
+  teeth-showing smile or speech made with the lips opens the mouth even when
+  `jawOpen` barely moves; the larger of the two drives the lip. The smile is
+  measured against the same wide-smile pose as the cheeks,
+  the frown against the sad pose, and both openings against the wide-open pose,
+  so all three fit this person's range. Until a range is measured — or when the
+  measured one is too flat to trust — the mouth falls back on a fixed span, so
+  it moves on the first tracked frame instead of waiting for a calibration.
+  Rounded lips (`mouthPucker` or `mouthFunnel`) narrow the mouth on their own,
+  so an "o" or "u" thins it even though neither corner moves. A frown hides
+  only part of a simultaneously reported smile, a lowered brow also pulls the
+  corners down, and the geometric drop of the mouth corners relative to the nose
+  is a third sadness signal, so a sad face still reads (and grows the
+  `LipCorner` covers) when the blendshape scores stay flat;
+* **mouth place and twist** — the midpoint of the mouth corners relative to the
+  nose moves the whole mouth (lips, gap and both `LipCorner` cuts) sideways and
+  up/down, and the corner line relative to the eye line twists it. The eye line
+  is the head's own roll, so tilting your head cancels out and only the mouth's
+  twist reads. The mouth bone pivots at the middle of the mouth, so a move is a
+  pure translation and a twist turns the lips about themselves — never about
+  the face centre, which would angle a mouth that was moved to the side. Both
+  channels are zero until a neutral pose has been measured, so a face that rests
+  with its mouth slightly off-centre still starts centred;
 * **gaze** — the head direction *plus* the eyes in their sockets. The head part
   comes from the nose, which sits forward of the face plane: it swings towards
   the side the head turns to and drops when the chin drops, so turning your head
   towards a screen corner moves the gaze there even though the pupils have not
-  moved in their sockets. The eye part is the `eyeLookIn/Out/Up/Down` blend
-  shapes. The two add up, so the face looks where you look, not merely where
+  moved in their sockets. The eye part is measured from the iris landmarks in the
+  eye's own frame and from that eye's own corners, not from the
+  `eyeLookIn/Out/Up/Down` blendshapes: those answer to the eyelids, so widening
+  the eyes used to read as a glance and drag the pupils off target. The iris
+  moves with the look but stays put when the lids open, and the corners are
+  fixed to the skull, so a bulge no longer moves the gaze. (The bridge was the
+  anchor before and it was the source of the bulge drift: opening the eyes wide
+  lifts the brows, which drags the bridge up, and measuring from a point on the
+  midline also gave the horizontal offset a long lever arm, so a hair of
+  eye-axis tilt leaked a sideways look into the vertical one.) All five iris points are
+  averaged, so a pixel of landmark jitter is divided by the ring rather than
+  trembling the eye; the tracked gaze then runs through the same dead zone and
+  One Euro filter as every other channel, with a steadier cutoff than the manual
+  gaze. The two add up, so the face looks where you look, not merely where
   your eyeballs sit in their sockets. The direction is screen-relative, exactly
   like the cursor mode: looking at the right edge of the screen moves the pupils
   to the right of the picture, even though the camera image itself is not
-  mirrored and reports that look the other way round. The cursor-follow step
-  measures both parts on your face: while you trace the pointer across the
-  screen, a least-squares fit learns how much of a look comes from the head and
+  mirrored and reports that look the other way round. The pupils calibration
+  measures both parts on your face: while you hold your gaze on each monitor
+  corner, a least-squares fit learns how much of a look comes from the head and
   how much from the eyes, and how far each travels. That is what puts the corner
   you look at on the rim of the eye, and the middle of the screen in the middle.
 
 The eyes and cheeks cannot be posed accurately until the camera knows your
-range, so the calibration is started by hand: press **Calibrate face** at the
-top of the window (or `R` in `mode track`), and the panel shows the tracking
-camera with one pose at a time.
-The sequence is the middle of the screen with your mouth closed, a cursor
-follow, a wide smile, a sad face (mouth corners and brows down), the mouth wide
-open, and finally each eye shut on its own: first the eye labelled **L** in the
-preview, then **R**.
+range, so the calibration is started by hand. Three buttons at the top of the
+window (`mode track` only) each measure one part, and every run begins with the
+neutral pose, so they can be repeated in any order:
 
-In the follow step the pointer is the reference: move the mouse slowly out to
-every corner of the screen and follow it with your eyes, keeping them open. Each
-reading is paired with where the pointer was at that moment, and the fit is
-built from those pairs. The step only measures once it has both enough readings
-(~4 s of tracing) and a cursor that really went out to all four edges — the bar
-stays short while either is missing, so a trace around the middle cannot leave
-the screen corners as a guess. That long take also measures the open-eye blink
-reading at every direction, which is what stops looking around from reading as
-a blink.
+* **Mouth** — neutral, a wide smile, a sad face (mouth corners and brows down),
+  and the mouth wide open. It sets the smile, frown, cheeks, brows, jaw and
+  inner-lip ranges.
+* **Eyes** — neutral, then each eye shut on its own: first the eye labelled
+  **L** in the preview, then **R**. It sets each lid's shut score and gap.
+* **Pupils** — neutral, then the four monitor corners: top left, top right,
+  bottom right, bottom left. Each is a held look, paired with that corner, and
+  the gaze map is fitted from the four pairs. The same holds record the
+  open-eye reading at every direction, which is what stops looking around from
+  reading as a blink. This run takes the window fullscreen and draws a green
+  ring at each point to look at, and the same crosshair `G` shows, so the mark
+  and the tracker can be compared as the run goes.
+
+`R` in `mode track` runs the mouth calibration again; it also retries the camera
+when it could not be opened. A run replaces only the channels it measures, so
+calibrating the mouth leaves the eyes and gaze as they were.
+
+In the corner steps the monitor corner is the reference: a green ring marks it,
+so look at the ring and hold while the pose is collected. The window is
+fullscreen for the run, which is what makes a position in the window a position
+on the monitor; the side panels step out of the way so they cannot cover a
+ring. Each held pose is paired with that corner, so a single run gives the fit
+four points (the neutral is the zero). Four corners also measure the open-eye
+blink reading in every direction, which is what stops looking around from
+reading as a blink. No mouse movement is involved. A corner hold stops
+collecting as soon as it has enough frames, so looking back at the panel to
+press Next does not drag the captured point towards the middle.
 
 Each pose has a **Start**: nothing is recorded until you press it, and the first
-~0.8 s after it are ignored so the movement into the pose is never measured. Then
+~0.4 s after it are ignored so the movement into the pose is never measured. Then
 the panel counts and says when the pose is measured; **Next** (or **Finish** on
 the last pose) moves on. **Next** always
 responds, so a click that came too early says so instead of doing nothing. The
-median of each still pose becomes the reference, so every value is measured
-against *your* range: 0 at rest, 1 at the pose you held. The smile pose covers
-both the mouth corners and the cheeks, so the cheek bands reach their full
-stretch and each mouth corner reaches its happiest on your own grin. The sad
-pose measures the mouth frown per side and the lowered brows, so the corner cuts
-reach their full sad shape; the wide-open pose measures the jaw, so ordinary
-speech opens the lower lip without the mouth ever looking slack. That is what
+median of each still pose becomes the reference, so the eyes, the expressions
+and the head all measure from *your* rest pose to the pose you held. The smile
+pose covers both the mouth corners and the cheeks, so the cheek bands reach
+their full stretch and each mouth corner reaches its happiest on your own grin.
+The sad pose measures the mouth frown per side and the lowered brows, so the
+corner cuts reach their full sad shape; the wide-open pose measures the jaw and
+the inner-lip gap, so both openings scale to your own range. That is what
 makes a blink reach fully shut even when MediaPipe's blendshape plateaus, and it
 is why a pose that was skipped cannot invent one: a signal that did not move is
 ignored rather than guessed at.
@@ -385,17 +465,18 @@ right eyelid, and the landmark groups around 33 and 263 are used accordingly.
 That is what makes a wink close the correct eye.
 
 Head position, head direction and gaze are measured against the neutral pose
-from the first calibration step, so the face settles wherever you normally sit.
+that begins every run, so the face settles wherever you normally sit.
 Look at the middle of the screen during that step, so the neutral gaze is the
-centre of the monitor. `R` also retries the camera when it could not be opened.
+centre of the monitor.
 
 The gaze map has no fixed gains any more: `fitGaze` in `src/face/landmarks.ts`
-learns it from the cursor follow, one axis at a time, as an offset per unit of
+learns it from the four corner looks, one axis at a time, as an offset per unit of
 head turn and per unit of eye movement. If the face cannot reach a corner after
-calibrating, the trace was too narrow or too fast rather than a constant being
-too low — retrace more slowly, out to every edge.
+calibrating, one of the corner holds was too short or the gaze drifted while it
+was collected — run the Pupils preset again and hold each corner steadily.
 
-Iris size (`V`) and pupil width (`B`) stay manual in both modes. The mouth keys
+Iris size (`V`) and pupil width (`B`) stay manual in both modes, and a tracked
+bulge shrinks and thins that manual size on top. The mouth keys
 (`N`/`J`/`L`/`H`) drive it in `mode manual`; `mode track` takes it over from the
 jaw, smile and frown signals.
 
@@ -408,13 +489,13 @@ bypassed for camera input (`setTrackedLook`), so the eyes do not trail the head
 through two filters. A frame is polled every 30 ms from the native capture slot,
 which hands out each new picture once.
 
-The camera is captured in Rust at 640×480 MJPG, 15 fps (`src-tauri/src/face_camera.rs`),
+The camera is captured in Rust at 640×480 MJPG, 30 fps (`src-tauri/src/face_camera.rs`),
 not through `getUserMedia`: WebKitGTK needs its GStreamer capture stack for
 that, and page capture also stops while the window is hidden. Frames go to the
 webview as raw JPEG bodies (`invoke("face_frame")` → `ArrayBuffer`), so the
 landmarker gets a picture without base64 or a JSON byte array. Tracking itself
-runs at up to ~15 Hz (about 11–20 ms per frame on this machine); the rig eases
-between readings on every rendered frame.
+runs on every captured frame (about 11–20 ms per frame on this machine); the rig
+eases between readings on every rendered frame.
 
 A dim frame is lifted before the model sees it (`src/face/lowlight.ts`). A single
 lamp, a monitor's glow or a dark room leaves a face far below the model's

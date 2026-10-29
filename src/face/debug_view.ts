@@ -286,15 +286,21 @@ export class CameraDebugView {
     const lines = [
       `L score ${fixed(raw.blinkLeft)} · lid ${fixed(raw.lidLeft)} · close ${fixed(sample.blinkLeft)}`,
       `R score ${fixed(raw.blinkRight)} · lid ${fixed(raw.lidRight)} · close ${fixed(sample.blinkRight)}`,
+      `wide L ${fixed(raw.eyeWideLeft)} R ${fixed(raw.eyeWideRight)} · pose ${fixed(sample.eyeWide)}`,
       `cheek L ${fixed(sample.cheekLeft)} R ${fixed(sample.cheekRight)}` +
         ` · squint L ${fixed(raw.cheekSquintLeft)} R ${fixed(raw.cheekSquintRight)}`,
       `smile L ${fixed(raw.smileLeft)} R ${fixed(raw.smileRight)}` +
         ` · brow L ${fixed(sample.browLeft)} R ${fixed(sample.browRight)}`,
       `mouth open ${fixed(sample.mouthOpen)} · width ${fixed(sample.mouthWidth)}` +
-        ` · jaw ${fixed(raw.jawOpen)}`,
+        ` · pucker ${fixed(sample.mouthPucker)} · jaw ${fixed(raw.jawOpen)}` +
+        ` · drop ${fixed(raw.mouthDrop)}`,
       `mouth happy L ${fixed(sample.mouthHappyLeft)} R ${fixed(sample.mouthHappyRight)}` +
         ` · sad L ${fixed(sample.mouthSadLeft)} R ${fixed(sample.mouthSadRight)}`,
+      `mouth shift ${signed(sample.mouthShiftX)} ${signed(sample.mouthShiftY)}` +
+        ` · tilt ${signed(sample.mouthTilt)}`,
+      `head turn ${signed(sample.headYaw)} ${signed(sample.headPitch)}`,
       `look ${signed(sample.lookX)} ${signed(sample.lookY)}` +
+        ` · eye ${signed(raw.lookH)} ${signed(raw.lookV)}` +
         ` · head ${signed(sample.x)} ${signed(sample.y)}` +
         ` · ${status}`,
     ];

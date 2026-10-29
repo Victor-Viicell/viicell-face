@@ -127,15 +127,20 @@ describe("PoseFilter", () => {
 function fakeRig() {
   const log: Record<string, number> = {};
   const rig = {
-    setHead: (x: number, y: number) => {
+    setHead: (x: number, y: number, yaw = 0, pitch = 0) => {
       log.headX = x;
       log.headY = y;
+      log.headYaw = yaw;
+      log.headPitch = pitch;
     },
     setTrackedLook: (x: number, y: number) => {
       log.lookX = x;
       log.lookY = y;
     },
     setEyeClose: () => {},
+    setEyeWide: (value: number) => {
+      log.eyeWide = value;
+    },
     setBrowClose: (value: number) => {
       log.brow = Math.max(log.brow ?? 0, value);
     },
@@ -153,6 +158,11 @@ function fakeRig() {
     setMouthCorner: (side: "left" | "right", value: number) => {
       log[side === "left" ? "cornerLeft" : "cornerRight"] = value;
     },
+    setMouthPose: (x: number, y: number, tilt: number) => {
+      log.mouthShiftX = x;
+      log.mouthShiftY = y;
+      log.mouthTilt = tilt;
+    },
     resetMouth: () => {},
   } as unknown as FaceRig;
   return { log, rig };
@@ -162,8 +172,12 @@ function sample(overrides: Partial<FaceSample> = {}): FaceSample {
   return {
     x: 0,
     y: 0,
+    headYaw: 0,
+    headPitch: 0,
     blinkLeft: 0,
     blinkRight: 0,
+    eyeWide: 0,
+    eyeWideScore: 0,
     lookX: 0,
     lookY: 0,
     cheekLeft: 0,
@@ -172,6 +186,10 @@ function sample(overrides: Partial<FaceSample> = {}): FaceSample {
     browRight: 0,
     mouthOpen: 0,
     mouthWidth: 0,
+    mouthPucker: 0,
+    mouthShiftX: 0,
+    mouthShiftY: 0,
+    mouthTilt: 0,
     mouthBottomWidth: 0,
     mouthHappyLeft: 0,
     mouthHappyRight: 0,
@@ -211,6 +229,68 @@ describe("FaceTracking", () => {
 
     expect(log.lookX).toBeGreaterThan(0.45);
     expect(log.lookY).toBeGreaterThan(0.25);
+  });
+
+  test("moves the eyes with the head turn, apart from the gaze", () => {
+    const tracking = new FaceTracking();
+    const { log, rig } = fakeRig();
+
+    tracking.set(sample({ headYaw: 1, headPitch: -1, lookX: 0, lookY: 0 }));
+    for (let i = 0; i < 30; i++) {
+      tracking.update(rig, DT);
+    }
+
+    expect(log.headYaw).toBeGreaterThan(0.9);
+    expect(log.headPitch).toBeLessThan(-0.9);
+    // The head turn is its own channel: the gaze itself did not move.
+    expect(log.lookX).toBeCloseTo(0, 5);
+    expect(log.lookY).toBeCloseTo(0, 5);
+  });
+
+  test("shrinks the eyes when they bulge, and lets go at rest", () => {
+    const tracking = new FaceTracking();
+    const { log, rig } = fakeRig();
+
+    tracking.set(sample({ eyeWide: 1 }));
+    for (let i = 0; i < 30; i++) {
+      tracking.update(rig, DT);
+    }
+    expect(log.eyeWide).toBeGreaterThan(0.9);
+
+    tracking.set(sample({ eyeWide: 0 }));
+    for (let i = 0; i < 60; i++) {
+      tracking.update(rig, DT);
+    }
+    expect(log.eyeWide).toBeLessThan(0.05);
+  });
+
+  test("holds the gaze and the eye lean while the eyes bulge", () => {
+    const tracking = new FaceTracking();
+    const { log, rig } = fakeRig();
+
+    tracking.set(sample({ lookX: 0.6, headYaw: 0.6 }));
+    for (let i = 0; i < 20; i++) {
+      tracking.update(rig, DT);
+    }
+    const heldLook = log.lookX;
+    const heldYaw = log.headYaw;
+
+    // The bulge drags the landmark-based readings the other way; the gaze and
+    // head lean must hold the pre-bulge direction, while the eye size still answers.
+    tracking.set(sample({ lookX: -0.6, headYaw: -0.6, eyeWide: 1, eyeWideScore: 1 }));
+    for (let i = 0; i < 20; i++) {
+      tracking.update(rig, DT);
+    }
+    expect(log.lookX).toBeCloseTo(heldLook, 2);
+    expect(log.headYaw).toBeCloseTo(heldYaw, 2);
+    expect(log.eyeWide).toBeGreaterThan(0.5);
+
+    // Released: the gaze follows the live reading again.
+    tracking.set(sample({ lookX: -0.6, headYaw: -0.6 }));
+    for (let i = 0; i < 40; i++) {
+      tracking.update(rig, DT);
+    }
+    expect(log.lookX).toBeLessThan(0);
   });
 
   test("opens, widens and lifts the mouth from the tracked signals", () => {
@@ -256,6 +336,20 @@ describe("FaceTracking", () => {
     expect(log.cornerRight).toBeGreaterThan(log.cornerLeft);
   });
 
+  test("narrows the mouth with rounded lips", () => {
+    const tracking = new FaceTracking();
+    const { log, rig } = fakeRig();
+
+    tracking.set(sample({ mouthPucker: 1 }));
+    for (let i = 0; i < 30; i++) {
+      tracking.update(rig, DT);
+    }
+
+    // An "o"/"u" shape narrows the mouth without a frown at either corner.
+    expect(log.mouthWidth).toBeLessThan(0.1);
+    expect(log.cornerLeft).toBeCloseTo(MOUTH.rest.corner, 5);
+  });
+
   test("narrows the mouth with a frown", () => {
     const tracking = new FaceTracking();
     const { log, rig } = fakeRig();
@@ -267,6 +361,35 @@ describe("FaceTracking", () => {
 
     // A frown travels from the rest width down to the narrow reference.
     expect(log.mouthWidth).toBeLessThan(0.05);
+  });
+
+  test("moves and twists the whole mouth from the tracked signals", () => {
+    const tracking = new FaceTracking();
+    const { log, rig } = fakeRig();
+
+    tracking.set(sample({ mouthShiftX: 1, mouthShiftY: 0.5, mouthTilt: -1 }));
+    for (let i = 0; i < 30; i++) {
+      tracking.update(rig, DT);
+    }
+
+    expect(log.mouthShiftX).toBeGreaterThan(0.9);
+    expect(log.mouthShiftY).toBeGreaterThan(0.4);
+    expect(log.mouthTilt).toBeLessThan(-0.9);
+  });
+
+  test("holds a still mouth in place through landmark noise", () => {
+    const tracking = new FaceTracking();
+    const { log, rig } = fakeRig();
+
+    for (let i = 0; i < 90; i++) {
+      const wobble = i % 2 === 0 ? 0.03 : -0.03;
+      tracking.set(sample({ mouthShiftX: wobble, mouthShiftY: wobble, mouthTilt: wobble }));
+      tracking.update(rig, DT);
+    }
+
+    expect(Math.abs(log.mouthShiftX)).toBeLessThan(0.001);
+    expect(Math.abs(log.mouthShiftY)).toBeLessThan(0.001);
+    expect(Math.abs(log.mouthTilt)).toBeLessThan(0.001);
   });
 
   test("leaves a relaxed mouth at the artwork's rest pose", () => {

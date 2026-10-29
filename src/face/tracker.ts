@@ -1,7 +1,11 @@
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import { FACE_TRACKING } from "../config";
-import type { ScreenPoint } from "../anchor";
-import { CalibrationFlow, type CalibrationProgress } from "./calibration";
+import {
+  CALIBRATION_PRESETS,
+  CalibrationFlow,
+  type CalibrationKind,
+  type CalibrationProgress,
+} from "./calibration";
 import type { FrameSource } from "./lowlight";
 import {
   NO_CALIBRATION,
@@ -43,6 +47,10 @@ export class FaceTracker {
   /** What the guided calibration measured; empty until it has run. */
   #calibration: Calibration = NO_CALIBRATION;
   #flow = new CalibrationFlow();
+  /** Kinds finished in this session, for the buttons' prompts. */
+  #done = new Set<CalibrationKind>();
+  /** The preset currently running, so a finished run can be recorded. */
+  #kind: CalibrationKind = "mouth";
   /** Monotonic timestamp the model expects. */
   #timestamp = 0;
 
@@ -57,6 +65,11 @@ export class FaceTracker {
   /** Where the calibration is; `step` is null when it is not running. */
   get progress(): CalibrationProgress {
     return { ...this.#flow.progress, calibrated: this.#calibration.neutral.calibrated };
+  }
+
+  /** Which calibration runs have finished, so the buttons can prompt for the rest. */
+  get done(): ReadonlySet<CalibrationKind> {
+    return this.#done;
   }
 
   /** Loads the WASM runtime and the model. Safe to call repeatedly. */
@@ -98,11 +111,8 @@ export class FaceTracker {
   /**
    * Runs the model on one camera frame. Returns null when no face is visible;
    * call it at most as often as the camera produces frames.
-   *
-   * `cursor` is only used by the calibration's follow step, which pairs each
-   * reading with where the pointer was at that moment.
    */
-  detect(source: FrameSource, nowMs: number, cursor: ScreenPoint | null = null): TrackReading | null {
+  detect(source: FrameSource, nowMs: number): TrackReading | null {
     const landmarker = this.#landmarker;
     if (!landmarker) {
       return null;
@@ -125,7 +135,7 @@ export class FaceTracker {
     }
 
     // The flow collects this pose while it runs, and ignores it otherwise.
-    this.#flow.add(raw, cursor);
+    this.#flow.add(raw);
 
     return {
       sample: faceSample(raw, this.#calibration),
@@ -136,11 +146,13 @@ export class FaceTracker {
   }
 
   /**
-   * Starts the step-by-step calibration. The current pose keeps responding on
-   * the calibration in use until the new one is finished.
+   * Starts one part of the step-by-step calibration. The current pose keeps
+   * responding on the calibration in use until the new one is finished, and a
+   * run only replaces the channels it measures.
    */
-  beginCalibration(): void {
-    this.#flow.restart();
+  beginCalibration(kind: CalibrationKind = "mouth"): void {
+    this.#kind = kind;
+    this.#flow.restart(CALIBRATION_PRESETS[kind], this.#calibration);
   }
 
   /** Begins collecting the pose on screen; nothing is read before it. */
@@ -153,6 +165,7 @@ export class FaceTracker {
     const calibration = this.#flow.next();
     if (calibration) {
       this.#calibration = calibration;
+      this.#done.add(this.#kind);
     }
     return calibration;
   }

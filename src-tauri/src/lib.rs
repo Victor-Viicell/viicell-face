@@ -172,6 +172,17 @@ fn set_tick_rate(ticker: State<'_, Ticker>, fps: u32) {
     ticker.set_rate(fps);
 }
 
+/// Puts the window in and out of fullscreen for the full-monitor look overlay.
+///
+/// The gaze crosshair and the calibration marks are positions on the monitor,
+/// so the window has to be the whole monitor for them to land where they say.
+#[tauri::command]
+fn set_fullscreen(window: tauri::WebviewWindow, fullscreen: bool) -> Result<(), String> {
+    window
+        .set_fullscreen(fullscreen)
+        .map_err(|error| error.to_string())
+}
+
 /// Whether the backend reads the input devices directly, which is what makes
 /// the controls work while another window has focus.
 #[tauri::command]
@@ -292,6 +303,7 @@ pub fn run() {
             microphone_status,
             input_global,
             set_tick_rate,
+            set_fullscreen,
             push_frame
         ])
         .setup(|app| {

@@ -75,8 +75,13 @@ describe("MOUTH.rest", () => {
     // frown is what narrows it to the Min reference.
     expect(MOUTH.rest.width).toBeGreaterThan(0.2);
     expect(MOUTH.rest.width).toBeLessThan(0.8);
-    expect(MOUTH.rest.open).toBeGreaterThan(0);
     expect(MOUTH.rest.corner).toBeGreaterThan(0);
+  });
+
+  test("rests shut, at the closed end of the open range", () => {
+    // A relaxed face reads as a closed mouth; the jaw opens it from there.
+    expect(MOUTH.rest.open).toBe(0);
+    expect(mouthOpenScale(MOUTH.rest.open)).toBeCloseTo(MOUTH.open.min, 6);
   });
 
   test("keeps the lower lip at the default width", () => {

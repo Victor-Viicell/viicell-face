@@ -67,15 +67,6 @@ export class Gaze {
     return this.#local ? "window" : "none";
   }
 
-  /**
-   * The cursor as it is right now, in monitor terms, for the calibration's
-   * follow step. Unlike `update` this is not eased or re-centred on the origin:
-   * it is the point the person was asked to look at.
-   */
-  get cursor(): GazePoint | null {
-    return this.#liveDesktop() ?? this.#local;
-  }
-
   setOrigin(origin: GazeAnchor): void {
     if (origin === this.#origin) {
       return;

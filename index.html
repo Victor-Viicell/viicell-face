@@ -17,6 +17,14 @@
          end up in the frames that are read back for the virtual camera. -->
     <canvas id="debug-camera" class="debug-camera" aria-hidden="true" hidden></canvas>
 
+    <!-- The full-monitor look overlay: a crosshair where the tracker says the
+         eyes look, and the mark a calibration step asks for. DOM, so it can
+         never be read back into the frames of the virtual camera. -->
+    <div id="look-overlay" class="look-overlay" aria-hidden="true" hidden>
+      <div id="look-target" class="look-target" hidden></div>
+      <div id="look-crosshair" class="look-crosshair" hidden><span></span></div>
+    </div>
+
     <div id="hud" class="hud" data-state="starting">
       <span class="dot"></span>
       <span id="hud-text">starting…</span>
@@ -28,10 +36,37 @@
 
     <div id="track-hint" class="input-hint track-hint" hidden></div>
 
-    <button id="calibrate" class="calibrate-button" type="button">Calibrate face</button>
+    <div id="calibrate" class="calibrate-group">
+      <button
+        class="calibrate-button"
+        type="button"
+        data-calibration="mouth"
+        title="Smile, frown and a wide-open mouth"
+      >
+        Mouth
+      </button>
+      <button
+        class="calibrate-button"
+        type="button"
+        data-calibration="eyes"
+        title="Each eye held shut, one at a time"
+      >
+        Eyes
+      </button>
+      <button
+        class="calibrate-button"
+        type="button"
+        data-calibration="pupils"
+        title="Look at each corner of the monitor in turn"
+      >
+        Pupils
+      </button>
+    </div>
 
     <div id="calibration" class="calibration" hidden>
-      <p class="calibration-title">Face calibration <span id="calibration-count"></span></p>
+      <p class="calibration-title">
+        <span id="calibration-kind">Face</span> calibration <span id="calibration-count"></span>
+      </p>
       <p id="calibration-text" class="calibration-instruction"></p>
       <div id="calibration-camera" class="calibration-camera"></div>
       <div class="calibration-track"><span id="calibration-fill"></span></div>
@@ -86,7 +121,7 @@
       </div>
       <div class="row">
         <span class="keys">tap <kbd>R</kbd></span>
-        <span class="what">recalibrate · retry camera</span>
+        <span class="what">recalibrate mouth · retry camera</span>
       </div>
       <div class="row">
         <span class="keys"><kbd>D</kbd></span>
@@ -95,6 +130,10 @@
       <div class="row" id="debug-row">
         <span class="keys">tap <kbd>T</kbd></span>
         <span class="what">camera + landmarks</span>
+      </div>
+      <div class="row" id="look-row">
+        <span class="keys">tap <kbd>G</kbd></span>
+        <span class="what">gaze crosshair (fullscreen)</span>
       </div>
       <p class="note">hold a mouse side button for every key</p>
       <p class="note">scroll up opens, grows · down closes</p>

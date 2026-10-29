@@ -25,6 +25,6 @@ export const BACKGROUND = "#11111b";
 export const FACE_TRACKING = {
   wasmPath: "/mediapipe/wasm",
   modelPath: "/models/face_landmarker.task",
-  /** Milliseconds between landmark runs; the camera delivers 15 frames/s. */
+  /** Milliseconds between landmark runs; matches the 30 frame/s camera. */
   intervalMs: 30,
 } as const;

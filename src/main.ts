@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { cameraStatus, pushFrame, startCamera, stopCamera } from "./camera";
 import { BACKGROUND, FACE_TRACKING, OUTPUT } from "./config";
+import { type CalibrationKind, lookTarget } from "./face/calibration";
 import { ARTBOARD, MOUTH } from "./face/art";
 import { CameraDebugView } from "./face/debug_view";
 import { LowLight } from "./face/lowlight";
@@ -13,6 +14,7 @@ import { FaceTracking } from "./face/tracking";
 import { faceCameraStatus, nextFaceFrame, startFaceCamera, stopFaceCamera } from "./face_camera";
 import { GAZE_ANCHORS, Gaze } from "./gaze";
 import { keysAreGlobal, startInput, subscribeInput } from "./input";
+import { LookOverlay } from "./look_overlay";
 import {
   MODE_KEY,
   RECENTRE_KEY,
@@ -42,10 +44,20 @@ const calibrationFill = document.querySelector<HTMLElement>("#calibration-fill")
 const calibrationCamera = document.querySelector<HTMLElement>("#calibration-camera")!;
 const calibrationNext = document.querySelector<HTMLButtonElement>("#calibration-next")!;
 const calibrationCancel = document.querySelector<HTMLButtonElement>("#calibration-cancel")!;
-const calibrateButton = document.querySelector<HTMLButtonElement>("#calibrate")!;
+const calibrationKindLabel = document.querySelector<HTMLElement>("#calibration-kind")!;
+const calibrateGroup = document.querySelector<HTMLElement>("#calibrate")!;
+const calibrateButtons = [
+  ...document.querySelectorAll<HTMLButtonElement>("[data-calibration]"),
+];
 const debugCanvas = document.querySelector<HTMLCanvasElement>("#debug-camera");
 const leanRow = document.querySelector<HTMLElement>("#lean-row");
 const debugRow = document.querySelector<HTMLElement>("#debug-row");
+const lookRow = document.querySelector<HTMLElement>("#look-row");
+const lookOverlay = new LookOverlay(
+  document.querySelector<HTMLElement>("#look-overlay")!,
+  document.querySelector<HTMLElement>("#look-crosshair")!,
+  document.querySelector<HTMLElement>("#look-target")!,
+);
 const modeName = document.querySelector<HTMLElement>("#mode-name")!;
 const modeRow = document.querySelector<HTMLElement>("#mode-row");
 
@@ -74,6 +86,17 @@ const tracking = new FaceTracking();
 let cameraDebug: CameraDebugView | null = null;
 /** Whether the step-by-step calibration panel is open. */
 let calibrating = false;
+/** Whether the `G` gaze crosshair is up. */
+let gazeOverlay = false;
+/** Whether the window is in fullscreen because of the look overlay. */
+let overlayFullscreen = false;
+/**
+ * Whether the window is confirmed to be the whole monitor, so a position in it
+ * is a monitor position. The marks are only drawn once this is true.
+ */
+let overlayMapped = false;
+/** Whether the fullscreen request failed; the run falls back to the bezel. */
+let overlayUnavailable = false;
 /** Whether the preview was on before the calibration opened it. */
 let previewBeforeCalibration = false;
 /** A one-off panel message that wins over the live status for a moment. */
@@ -145,6 +168,9 @@ async function boot() {
       rig.setEyesFrozen(false);
       tracking.reset(rig);
       controls.reapply();
+      // The crosshair is a tracked-gaze readout; it has nothing to show here.
+      gazeOverlay = false;
+      syncLookOverlay();
     }
     applyModeUi(mode);
   });
@@ -164,6 +190,7 @@ async function boot() {
     }
 
     tracking.update(rig, dt, gaze.anchor);
+    updateLookOverlay();
     void pumpTracking();
   });
 
@@ -179,7 +206,7 @@ async function boot() {
   });
 
   if (!isTauri) {
-    calibrateButton.hidden = true;
+    calibrateGroup.hidden = true;
     setHud("preview", "browser preview — the camera bridge needs the Tauri window");
     return;
   }
@@ -199,7 +226,11 @@ async function boot() {
   });
 
   retryButton.addEventListener("click", () => void connect());
-  calibrateButton.addEventListener("click", () => startCalibration(rig));
+  for (const button of calibrateButtons) {
+    button.addEventListener("click", () =>
+      startCalibration(rig, button.dataset.calibration as CalibrationKind),
+    );
+  }
   calibrationNext.addEventListener("click", () => advanceCalibration());
   calibrationCancel.addEventListener("click", () => {
     tracker.cancelCalibration();
@@ -352,12 +383,15 @@ async function refreshStatus() {
     const eyes = trackingMode ? `eyes camera·${gaze.label}` : `eyes ${gaze.label}·${gaze.source}`;
     const keys = keysAreGlobal() ? "global" : "window";
     const mode = trackingMode ? "mode track" : "mode manual";
-    // Nothing follows the face until it has been measured once, so point at the
-    // button that does it.
-    calibrateButton.classList.toggle(
-      "attention",
-      trackingMode && !calibrating && !tracker.progress.calibrated,
-    );
+    // Nothing follows a part of the face until it has been measured once, so
+    // point at the button that does it.
+    for (const button of calibrateButtons) {
+      const kind = button.dataset.calibration as CalibrationKind;
+      button.classList.toggle(
+        "attention",
+        trackingMode && !calibrating && !tracker.done.has(kind),
+      );
+    }
     setHud(
       "live",
       `${mode} · ${device.label} · ${device.path} · ${width}×${height} ${pixelFormat} · ` +
@@ -450,21 +484,118 @@ function showTrackHint() {
 }
 
 /**
+ * Whether the full-monitor look overlay should be up.
+ *
+ * Two things want it: the `G` crosshair, and the pupil calibration, whose
+ * corner marks have to sit where the fit says they are.
+ */
+function lookOverlayWanted(): boolean {
+  return gazeOverlay || (calibrating && tracker.progress.kind === "pupils");
+}
+
+/**
+ * Shows or hides the overlay, and takes the window fullscreen with it.
+ *
+ * The marks are positions on the monitor, so the window has to be the whole
+ * monitor for them to land where they claim. Leaving fullscreen puts the window
+ * back how the window manager had it.
+ */
+function syncLookOverlay(): void {
+  const wanted = lookOverlayWanted();
+  if (!isTauri) {
+    // A browser has no window manager to go fullscreen; window units it is.
+    overlayMapped = wanted;
+  }
+
+  // Nothing is drawn until the window is known to be the monitor. A failed
+  // fullscreen (an older backend, no support) leaves the run on the physical
+  // corners rather than putting the crosshair in a place it does not mean.
+  const shown = wanted && overlayMapped;
+  lookOverlay.setVisible(shown);
+  document.body.classList.toggle("looking", shown);
+  lookRow?.classList.toggle("active", gazeOverlay);
+
+  if (wanted === overlayFullscreen) {
+    return;
+  }
+  overlayFullscreen = wanted;
+
+  if (!isTauri) {
+    return;
+  }
+
+  if (!wanted) {
+    overlayMapped = false;
+    overlayUnavailable = false;
+    void invoke("set_fullscreen", { fullscreen: false }).catch(() => {});
+    return;
+  }
+
+  void invoke("set_fullscreen", { fullscreen: true })
+    .then(() => {
+      if (!overlayFullscreen) {
+        return;
+      }
+      overlayMapped = true;
+      overlayUnavailable = false;
+      syncLookOverlay();
+    })
+    .catch(() => {
+      if (!overlayFullscreen) {
+        return;
+      }
+      overlayMapped = false;
+      overlayUnavailable = true;
+      syncLookOverlay();
+    });
+}
+
+/** Places the crosshair and the calibration mark for the current frame. */
+function updateLookOverlay(): void {
+  if (!lookOverlay.visible) {
+    return;
+  }
+
+  lookOverlay.setTarget(
+    calibrating && overlayMapped ? lookTarget(tracker.progress.step) : null,
+  );
+
+  // The rig's own eased gaze: what the face is doing, which is what is being
+  // judged. Before the first pupil run it stays centred, like the pupils.
+  const pose = tracking.pose;
+  lookOverlay.setCrosshair(
+    faceMode() === "track" && overlayMapped
+      ? { u: (pose.lookX + 1) / 2, v: (pose.lookY + 1) / 2 }
+      : null,
+  );
+}
+
+/** Toggles the tracked-gaze crosshair; tracking mode only. */
+function toggleGazeOverlay(): void {
+  if (faceMode() !== "track") {
+    return;
+  }
+  gazeOverlay = !gazeOverlay;
+  syncLookOverlay();
+}
+
+/**
  * Opens the step-by-step calibration, with the tracking camera inside the panel.
  *
  * The calibration already in use stays live until the new one is finished, so a
  * cancelled run changes nothing.
  */
-function startCalibration(rig: FaceRig) {
+function startCalibration(rig: FaceRig, kind: CalibrationKind = "mouth") {
   if (!isTauri) {
     return;
   }
 
-  // Pressing the key again while the panel is open restarts the poses instead of
-  // reopening everything.
+  // Pressing a button again while the panel is open restarts that part of the
+  // poses instead of reopening everything.
   if (calibrating) {
-    tracker.beginCalibration();
+    tracker.beginCalibration(kind);
     renderCalibration();
+    syncLookOverlay();
     return;
   }
 
@@ -476,7 +607,7 @@ function startCalibration(rig: FaceRig) {
     void beginTracking(rig);
   }
 
-  tracker.beginCalibration();
+  tracker.beginCalibration(kind);
   calibrating = true;
   previewBeforeCalibration = cameraDebug?.visible ?? false;
   cameraDebug?.setVisible(true);
@@ -486,10 +617,11 @@ function startCalibration(rig: FaceRig) {
     calibrationCamera.append(debugCanvas);
   }
 
-  calibrateButton.hidden = true;
+  calibrateGroup.hidden = true;
   calibrationPanel.hidden = false;
   calibrationNotice = { text: "", at: 0 };
   renderCalibration();
+  syncLookOverlay();
 }
 
 /** Redraws the panel from the pose the tracker is collecting. */
@@ -504,8 +636,15 @@ function renderCalibration() {
     return;
   }
 
+  calibrationKindLabel.textContent = progress.label || "Face";
   calibrationCount.textContent = `${progress.index}/${progress.total}`;
-  calibrationText.textContent = progress.instruction;
+  // Without a confirmed fullscreen the marks would sit at window positions, not
+  // monitor ones, so the run falls back to the bezel with the old instruction.
+  const bezel =
+    overlayUnavailable && progress.kind === "pupils" && progress.step !== "neutral";
+  calibrationText.textContent = bezel
+    ? "Look at that corner of the monitor itself — restart the app for the on-screen marks"
+    : progress.instruction;
   calibrationFill.style.width = `${Math.round(progress.filled * 100)}%`;
 
   const fresh = performance.now() - calibrationNotice.at < 900;
@@ -567,7 +706,7 @@ function advanceCalibration() {
 function closeCalibration() {
   calibrating = false;
   calibrationPanel.hidden = true;
-  calibrateButton.hidden = false;
+  calibrateGroup.hidden = false;
   calibrationNotice = { text: "", at: 0 };
 
   if (debugCanvas) {
@@ -575,6 +714,7 @@ function closeCalibration() {
   }
   cameraDebug?.setVisible(previewBeforeCalibration);
   debugRow?.classList.toggle("active", cameraDebug?.visible ?? false);
+  syncLookOverlay();
 }
 
 /**
@@ -605,7 +745,7 @@ async function pumpTracking() {
     const bitmap = await createImageBitmap(new Blob([frame], { type: "image/jpeg" }));
     const picture = lowLight.prepare(bitmap);
     try {
-      const reading = tracker.detect(picture, performance.now(), gaze.cursor);
+      const reading = tracker.detect(picture, performance.now());
       renderCalibration();
       // The preview draws the very picture the model just saw, so the outlines
       // and the pose always belong together.
@@ -696,6 +836,8 @@ const SIZE_KEYS: Record<SizePart, string> = { iris: "v", pupils: "b" };
 const MOUTH_KEYS: Record<MouthPart, string> = { width: "n", open: "j", bottom: "l", corner: "h" };
 /** Toggles the tracking camera preview (see `face/debug_view.ts`). */
 const DEBUG_KEY = "t";
+/** Toggles the full-monitor gaze crosshair, in tracking mode. */
+const LOOK_KEY = "g";
 /** What the preview says while the camera is not running. */
 const CAMERA_OFF_MESSAGE = "camera off · manual mode";
 /** Multiplier limits, matching what the rig accepts. */
@@ -878,7 +1020,7 @@ function setupFaceControls(app: Application, rig: FaceRig): { reapply: () => voi
     if (input.name === RECENTRE_KEY) {
       if (input.type === "keydown" && faceMode() === "track") {
         // Also retries the camera when it never opened.
-        startCalibration(rig);
+        startCalibration(rig, "mouth");
       }
       return;
     }
@@ -896,6 +1038,12 @@ function setupFaceControls(app: Application, rig: FaceRig): { reapply: () => voi
       }
       // The camera the landmarker reads, with its landmarks over it.
       debugRow?.classList.toggle("active", cameraDebug?.toggle() ?? false);
+      return;
+    }
+
+    if (input.type === "keydown" && input.name === LOOK_KEY) {
+      // Where the tracker thinks the eyes look, over the whole monitor.
+      toggleGazeOverlay();
       return;
     }
 

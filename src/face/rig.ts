@@ -36,6 +36,19 @@ const BROW_SWING = 0.12;
 const CHEEK_SWING = 0.09;
 
 /**
+ * Travel of the whole mouth at pose 1, in artboard units. The mouth bone pivots
+ * at the middle of the mouth, so this is a pure translation: the lips, the gap
+ * and both corner cuts move together instead of being stretched from the face.
+ */
+const MOUTH_SHIFT = { x: 80, y: 34 } as const;
+/**
+ * Twist of the whole mouth at pose 1, in radians (~9°) around the mouth's own
+ * pivot. A head roll is already cancelled upstream, so this is the mouth's own
+ * twist and stays out of the way of the eye line.
+ */
+const MOUTH_TILT = 0.16;
+
+/**
  * How far past the rim a pupil may travel, as a multiplier on the room its
  * shell leaves. The mask clips the excess, so the pupil rides the edge.
  */
@@ -45,7 +58,14 @@ const RIM_OVERSHOOT = 1.4;
  * height, so its own rim leaves too little room for an upward look to read.
  * At this value the pupil reaches the top and bottom of the shell.
  */
-const RIM_OVERSHOOT_Y = 2.4;
+const RIM_OVERSHOOT_Y = 5;
+/**
+ * How much a full eye-wide pose shrinks the iris, as a fraction of its drawn
+ * size, and how much it thins the pupil slit. The manual `V`/`B` sizes are the
+ * base these multiply, so a bulge reads on top of whatever iris was chosen.
+ */
+const IRIS_WIDE_SHRINK = 0.3;
+const PUPIL_WIDE_SHRINK = 0.5;
 
 /**
  * How far the whole eye leans after the look, as a fraction of its own shell
@@ -62,6 +82,14 @@ const LEAN_Y = 0.075;
  */
 const HEAD_LEAN_X = 0.24;
 const HEAD_LEAN_Y = 0.135;
+/**
+ * Lean from the head itself turning, as a fraction of the shell half-size. This
+ * is its own channel: turning or nodding the head slides the whole eye even
+ * while the pupils stay centred, so the eyes answer the neck independently of
+ * where the gaze is pointed.
+ */
+const HEAD_TURN_LEAN_X = 0.3;
+const HEAD_TURN_LEAN_Y = 0.16;
 /** How much of that lean the brow and cheek slashes take. They sit against the
  * eyes, so following the glance keeps the lids from cutting into a shell that
  * has slid out from under them.
@@ -186,6 +214,10 @@ export class FaceRig {
     left: MOUTH.rest.corner,
     right: MOUTH.rest.corner,
   };
+  /** Mouth offset from its rest place, -1..1 per axis. */
+  #mouthShift = { x: 0, y: 0 };
+  /** Mouth twist around its own centre, -1..1 (+ clockwise). */
+  #mouthTilt = 0;
 
   /** Displacement each bone gets from the current look, in artboard units. */
   #lean = new Map<BoneId, { x: number; y: number }>();
@@ -197,6 +229,10 @@ export class FaceRig {
 
   /** Iris multiplier, 1 = as drawn. */
   #irisScale = 1;
+  /** Pupil slit width multiplier, 1 = as drawn. */
+  #pupilWidth = 1;
+  /** Eye widening from the tracker, 0..1. */
+  #eyeWide = 0;
   /** Blink scale of each eye assembly, 1 = open. */
   #openness: Record<Side, number> = { left: 1, right: 1 };
   /** Last look direction, re-applied when the iris changes size. */
@@ -206,6 +242,11 @@ export class FaceRig {
    * on top of the look's. Manual mode leaves it at zero.
    */
   #head = { x: 0, y: 0 };
+  /**
+   * How far the head itself is turned, -1..1 per axis, independent of the gaze.
+   * Another lean on the eyes, so a turn moves them even with the pupils still.
+   */
+  #headTurn = { yaw: 0, pitch: 0 };
   /**
    * Direction the irises are aimed with. It holds still while the eyes are
    * frozen, and trails `#look` for a moment after, so the gaze never jumps.
@@ -441,9 +482,14 @@ export class FaceRig {
    * Head offset, -1..1 per axis (x → right, y → down), as seen by the tracking
    * camera. Adds a lean to the eyes on top of the one the look already gives;
    * manual mode keeps it at zero.
+   *
+   * `yaw` and `pitch` are the head's own turn (-1..1, right and down). They are
+   * a separate channel from the look: a turn slides the whole eye even when the
+   * pupils stay centred.
    */
-  setHead(x: number, y: number): this {
+  setHead(x: number, y: number, yaw = 0, pitch = 0): this {
     this.#head = { x: clamp(x, -1, 1), y: clamp(y, -1, 1) };
+    this.#headTurn = { yaw: clamp(yaw, -1, 1), pitch: clamp(pitch, -1, 1) };
     this.#leanFace();
     return this;
   }
@@ -455,7 +501,8 @@ export class FaceRig {
   setIrisScale(scale: number): this {
     this.#irisScale = clamp(scale, 0.4, 1.6);
     this.#applyIris();
-    // A grown disc has less room to travel, so re-aim it in its new size.
+    // The travel is the drawn eye's and does not change with the size; re-aiming
+    // only re-applies the current look at the new scale.
     this.#applyLook(this.#look.x, this.#look.y);
     return this;
   }
@@ -535,9 +582,14 @@ export class FaceRig {
    * its drawn height while the lids come down and the shell mask trims it.
    */
   #applyIris(): void {
-    const x = this.#irisScale;
+    const x = this.#irisSize();
     this.bones.eyeLeftIris.node.scale.set(x, x / this.#openness.left);
     this.bones.eyeRightIris.node.scale.set(x, x / this.#openness.right);
+  }
+
+  /** Iris scale with the tracked eye-wide shrink applied. */
+  #irisSize(): number {
+    return this.#irisScale * (1 - IRIS_WIDE_SHRINK * this.#eyeWide);
   }
 
   /** Look direction, -1..1 per axis (x → right, y → down). Moves both irises. */
@@ -618,9 +670,10 @@ export class FaceRig {
 
   /**
    * Turns the face towards the look and the tracked head. Each eye shifts as a
-   * whole — shell, iris and pupil — and the brows and cheeks follow at a
-   * fraction, so the slashes keep their distance from a shell that is leaning
-   * past them.
+   * whole — shell, iris and pupil — from three independent parts: where the gaze
+   * points, where the head sits in the frame, and how far the head itself is
+   * turned. The brows and cheeks follow at a fraction, so the slashes keep their
+   * distance from a shell that is leaning past them.
    */
   #leanFace(): void {
     const shell = this.#bounds.get("eyeLeftShell");
@@ -635,9 +688,17 @@ export class FaceRig {
     const halfW = (shell.maxX - shell.minX) / 2;
     const halfH = (shell.maxY - shell.minY) / 2;
     const leanX =
-      (this.#look.x * LEAN_X + this.#head.x * HEAD_LEAN_X) * halfW * open;
+      (this.#look.x * LEAN_X +
+        this.#head.x * HEAD_LEAN_X +
+        this.#headTurn.yaw * HEAD_TURN_LEAN_X) *
+      halfW *
+      open;
     const leanY =
-      (this.#look.y * LEAN_Y + this.#head.y * HEAD_LEAN_Y) * halfH * open;
+      (this.#look.y * LEAN_Y +
+        this.#head.y * HEAD_LEAN_Y +
+        this.#headTurn.pitch * HEAD_TURN_LEAN_Y) *
+      halfH *
+      open;
 
     this.#setLean("eyeLeft", leanX, leanY);
     this.#setLean("eyeRight", leanX, leanY);
@@ -653,22 +714,26 @@ export class FaceRig {
   }
 
   #aimIris(eye: "eyeLeft" | "eyeRight", iris: Bone): void {
-    const room = this.#lookRoom(eye, iris);
+    // The gaze map is tied to the eye as drawn, never to the current iris size:
+    // resizing the iris (by hand or by a bulge) must not change how far a given
+    // look moves the eye, or the monitor calibration would drift. The shell mask
+    // trims whatever a large disc spills past the edge, so no clamp is needed.
+    const travel = this.#lookRoom(eye, iris);
     const { x, y } = this.#pupilAim;
     // The iris travels with its shell: a freeze stops the gaze, not the lean, so
     // there is nothing to compensate here — the whole eye moves as one piece.
     iris.moveBy(
-      x >= 0 ? x * room.maxX : x * -room.minX,
-      y >= 0 ? y * room.maxY : y * -room.minY,
+      x >= 0 ? x * travel.maxX : x * -travel.minX,
+      y >= 0 ? y * travel.maxY : y * -travel.minY,
     );
   }
 
   /**
-   * How far an iris may travel before it leaves its shell, in artboard units:
-   * negative to the left/up, positive to the right/down. The iris scale counts,
-   * since a grown disc has less room, and an axis with no room is pinned to zero
-   * instead of pushing the disc out of the eye. `RIM_OVERSHOOT` then lets the
-   * pupil ride past that edge, which the mask trims.
+   * How far an iris may travel for the gaze, in artboard units: negative to the
+   * left/up, positive to the right/down. This is measured once, for the iris as
+   * drawn, so it does not move with the current size. `RIM_OVERSHOOT` lets the
+   * travel pass the shell edge, which the mask trims, so the pupil always
+   * reaches the rim instead of stopping short of it.
    */
   #lookRoom(eye: "eyeLeft" | "eyeRight", iris: Bone): Box {
     const shell = this.#bounds.get(`${eye}Shell`);
@@ -677,8 +742,8 @@ export class FaceRig {
       return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
     }
 
-    const halfW = ((disc.maxX - disc.minX) / 2) * this.#irisScale;
-    const halfH = ((disc.maxY - disc.minY) / 2) * this.#irisScale;
+    const halfW = (disc.maxX - disc.minX) / 2;
+    const halfH = (disc.maxY - disc.minY) / 2;
     const [cx, cy] = iris.pivot;
 
     return {
@@ -707,9 +772,29 @@ export class FaceRig {
 
   /** Pupil slit width; 1 = as drawn. */
   setPupilWidth(multiplier: number): this {
-    const width = clamp(multiplier, 0.2, 3);
+    this.#pupilWidth = clamp(multiplier, 0.2, 3);
+    this.#applyPupil();
+    return this;
+  }
+
+  #applyPupil(): void {
+    const width = this.#pupilWidth * (1 - PUPIL_WIDE_SHRINK * this.#eyeWide);
     this.bones.eyeLeftPupil.scaleBy(width, 1);
     this.bones.eyeRightPupil.scaleBy(width, 1);
+  }
+
+  /**
+   * 0 = rest, 1 = the eyes bulged wide. Shrinks the iris and thins the pupil
+   * slit on top of the sizes set by hand: a wide eye shows less of the dark
+   * disc and a narrower slit.
+   */
+  setEyeWide(amount: number): this {
+    this.#eyeWide = clamp(amount, 0, 1);
+    this.#applyIris();
+    // A smaller disc has more room to travel, so re-aim it in its new size.
+    this.#aimIris("eyeLeft", this.bones.eyeLeftIris);
+    this.#aimIris("eyeRight", this.bones.eyeRightIris);
+    this.#applyPupil();
     return this;
   }
 
@@ -766,6 +851,22 @@ export class FaceRig {
     return this;
   }
 
+  /**
+   * Moves and twists the whole mouth from the camera: `x` and `y` are -1..1 and
+   * `tilt` is -1..1 (+ clockwise).
+   *
+   * The mouth bone pivots at the middle of the mouth, so `x`/`y` translate the
+   * lips, the gap and both corner cuts as one piece, and `tilt` turns them about
+   * themselves. Nothing here swings the mouth from the face centre: a corner
+   * moving to the side keeps the lip line level.
+   */
+  setMouthPose(x: number, y: number, tilt: number): this {
+    this.#mouthShift = { x: clamp(x, -1, 1), y: clamp(y, -1, 1) };
+    this.#mouthTilt = clamp(tilt, -1, 1);
+    this.#applyMouthPose();
+    return this;
+  }
+
   /** The resting smile, used by manual mode and when tracking lets go. */
   resetMouth(): this {
     this.#mouthOpen = MOUTH.rest.open;
@@ -773,6 +874,9 @@ export class FaceRig {
     this.#mouthBottomWidth = MOUTH.rest.bottomWidth;
     this.#mouthCorner.left = MOUTH.rest.corner;
     this.#mouthCorner.right = MOUTH.rest.corner;
+    this.#mouthShift = { x: 0, y: 0 };
+    this.#mouthTilt = 0;
+    this.#applyMouthPose();
     this.#applyMouth();
     return this;
   }
@@ -785,6 +889,19 @@ export class FaceRig {
       mouthOpenScale(this.#mouthOpen),
     );
     this.#syncMouthCorners();
+  }
+
+  /**
+   * Writes the mouth's place and twist. Kept apart from `#applyMouth`, which
+   * shapes the lips, so a pose update never touches that shape.
+   */
+  #applyMouthPose(): void {
+    const bone = this.bones.mouth;
+    bone.node.position.set(
+      bone.pivot[0] + this.#mouthShift.x * MOUTH_SHIFT.x,
+      bone.pivot[1] + this.#mouthShift.y * MOUTH_SHIFT.y,
+    );
+    bone.node.rotation = this.#mouthTilt * MOUTH_TILT;
   }
 
   /**
@@ -814,8 +931,11 @@ export class FaceRig {
   /** Every bone back to its rest pose, including any eyelid stretch. */
   rest(): this {
     this.#irisScale = 1;
+    this.#pupilWidth = 1;
+    this.#eyeWide = 0;
     this.#openness = { left: 1, right: 1 };
     this.#head = { x: 0, y: 0 };
+    this.#headTurn = { yaw: 0, pitch: 0 };
     this.#look = { x: 0, y: 0 };
     this.#pupilAim = { x: 0, y: 0 };
     this.#lean.clear();

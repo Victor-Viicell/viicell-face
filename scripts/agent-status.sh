@@ -33,4 +33,4 @@ grep -c '^- \[!\]' docs/SHIP-PLAN.md 2>/dev/null
 
 echo
 echo "=== last progress entry ==="
-awk '/^## /{n++} n>=2' docs/PROGRESS.md 2>/dev/null | head -20
+awk '/^## /{buf=""} {buf=buf $0 "\n"} END{printf "%s", buf}' docs/PROGRESS.md 2>/dev/null | head -18

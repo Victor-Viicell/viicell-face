@@ -14,7 +14,8 @@ changed, what was verified and how, what was NOT verified.
   * `docs/NEXT.md` — the baton (rewritten by every session).
   * `scripts/check.sh` — the one gate before a commit (tsc, bun test, vite
     build, cargo test, cargo check, windows target when installed).
-  * `scripts/agent-lock.sh` — single-writer guard, 110 min staleness.
+  * `scripts/agent-lock.sh` — single-writer guard, 75 min staleness (a dead
+    session frees the lock after one tick rather than blocking the rotation).
   * `scripts/agent-status.sh` — cheap context for the hourly tick.
 * Baseline measured on this machine: bun 1.4.4, node 26, rustc 1.99, all 167 TS
   tests pass, `tsc --noEmit` clean, `cargo check` clean, v4l2loopback present as

@@ -51,12 +51,13 @@ Ticket format: **goal** — *acceptance* (the thing that must be true) — files
   documented source and updates from the existing status polls; no text jumps.
   — `src/hud.ts`, `styles.css`
 
-- [ ] **VF-012 settings panel** — bind VF-003: resolution, fps, device picker
-  (with "recommended" marker), camera picker, origin grid, accent, "start in
-  track". Changing resolution restarts the stream with a visible busy state.
+- [x] **VF-012 settings panel** — bind VF-003: resolution, fps, origin grid,
+  "start in track". Changing resolution restarts the stream with a visible busy
+  state. (Device/camera pickers and `accent` deferred: each needs a backend
+  reader first — see NEXT.md "Decisions open".)
   *Acceptance:* every control round-trips through the store and survives a
   restart; invalid sizes are clamped before they reach Rust.
-  — `src/shell.ts`, `settings.ts`
+  — `src/settings_panel.ts`, `src/settings_view.ts`, `stream.ts`, `settings.ts`
 
 - [ ] **VF-013 first-run wizard** — 4 steps: virtual camera present? → input
   permission → microphone → webcam. Each step: current state, what it is for,

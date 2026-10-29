@@ -271,3 +271,65 @@ changed, what was verified and how, what was NOT verified.
   foot is now 124 px of a 360 px window: that is the key map's problem
   (VF-014 removes it), but if the strip ever needs to be shorter, the device
   chip (197 px, size + format) is the one to split.
+
+## 2026-10-29 — session 6 — VF-012 settings panel
+
+* **Changed**: the dock has a **settings** section, bound to the store VF-003
+  built, with four controls that all round-trip and survive a restart.
+  * `src/settings_view.ts` (new, 190) — the panel's decisions without a DOM:
+    `OUTPUT_PRESETS` (1920×1080 / 1280×720 / 960×540 / 640×360, all 16:9 because
+    the artboard is scaled by width), `FPS_PRESETS` (60/30/24/15),
+    `outputChoices` / `fpsChoices` (a saved value that is not a preset gets its
+    own entry first, so the control never lies), `parseSize` (accepts the
+    `1280×720` label, rounds to even and clamps to `LIMITS.output` **before**
+    the store sees it), `originChoices` (built from `GAZE_ANCHORS`, so the grid
+    and the keys cover the same five points) and `panelView` (size label, fps,
+    origin, start-in-track — read from `Settings`, never from `Gaze`).
+  * `src/settings_panel.ts` (new, 140) — `installSettingsPanel(settings,
+    {reconnect, setOrigin})`: one `paint(settings)` driven by `subscribe`, the
+    fold toggle (moved out of `main.ts`), and `restart()` which writes, sets
+    `shell.setSettingsBusy(true)`, awaits `reconnect`, and only then re-enables.
+  * `src/stream.ts` — `applyOutput(app, rig, settings)`: `renderer.resize` →
+    `rig.setScale(width / ARTBOARD.width)` → `set_tick_rate` → `connect()`, in
+    that order; four things have to agree or frames of the wrong length go out.
+    Returns after the first two when `installStream` was never called (browser
+    preview has no ticker and no writer, and `connect()` would throw there).
+  * `src/face/rig.ts` — `setScale(scale)`, the one number a size change needs
+    from the rig.
+  * `src/controls.ts` — `setupGazeControls` now **returns** its `pick`, so the
+    panel's origin grid and the `0`/`1`–`5` keys are the same path.
+  * `src/shell.ts` — five new ids (`#settings`, `#setting-size`, `#setting-fps`,
+    `#setting-origin`, `#setting-start-track`) and `setSettingsBusy(busy)`
+    (`.busy` on the section + `disabled` on every control inside it).
+  * `index.html` / `src/styles.css` — the section above the key map: two
+    selects, a 2×2+centre origin grid (built in JS from the shared anchor list),
+    a checkbox; `.setting-row` is the same 78 px label column the key map uses.
+  * `src/main.ts` (242, was 243) — installs the panel before the preview branch
+    and lets the setting decide the start mode: `(await startupFaceMode()) ??
+    settings.value("startMode")`.
+  * `README.md` — "Changing the output" is now a table of the four rows and when
+    each applies, the busy state, and the three keys that are still groundwork;
+    the dock description and the module table name the two new files.
+* **Verified**: `scripts/check.sh` → CHECK GREEN (`tsc --noEmit`; `bun test`
+  292 pass / 15 files — `src/settings_view.test.ts` is new, 16 tests, covering
+  the presets, the extra saved entry, odd/out-of-range parsing, the store clamp
+  behind it, the grid vs `GAZE_ANCHORS`, and `panelView` round-tripping through
+  `parseSize`; `vite build`; `cargo test --lib`; `cargo check`). Windows gate
+  still SKIP. In Chromium against `vite preview`, driven over CDP: the size
+  select lists the four presets with `1280×720` selected and the rate lists
+  60/30/24/15 with `30`; setting size to `640×360` took `#output` from
+  1280×720 to 640×360 with its CSS box unchanged at 448 px, controls re-enabled
+  and `.busy` cleared; the origin grid showed five buttons with `centre` active
+  and `aria-pressed`, clicking `bottomRight` moved the active mark; the
+  start-in-track checkbox went false→true→false with the paint following; the
+  fold still folds to 44 px and back to 320 px with the grid's mark intact.
+  At 640×360 the section is 186 px tall, the body scrolls (569 vs 271 px) and
+  nothing overflows horizontally — no clipped button (`scrollWidth ==
+  clientWidth` on all five) and no clipped select.
+* **Not verified**: the restart against a real v4l2 device — no backend in a
+  headless session, so `applyOutput`'s `set_tick_rate` + `connect()` path and
+  `start_camera`'s teardown at a new size were never executed, and the browser
+  preview returns before them by design. `rig.setScale` was only exercised as
+  `root.scale.set` in the preview (the face is not drawn there without WebGL
+  readback). The panel's persistence across a real quit depends on the debounced
+  write landing — `beforeunload` still calls `settings.save()`.

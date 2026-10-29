@@ -533,8 +533,14 @@ export function setupFaceControls(
  *
  * The origin is saved, because it is picked once for a whole call and having to
  * pick it again after every restart was the thing people forgot.
+ *
+ * Returns the picker, so the settings panel changes the origin through this one
+ * path instead of a second copy of "set the gaze, save it".
  */
-export function setupGazeControls(gaze: Gaze, settings: SettingsStore): void {
+export function setupGazeControls(
+  gaze: Gaze,
+  settings: SettingsStore,
+): (origin: GazeAnchor) => void {
   let held = false;
   let picked = false;
 
@@ -580,4 +586,6 @@ export function setupGazeControls(gaze: Gaze, settings: SettingsStore): void {
   window.addEventListener("blur", () => {
     held = false;
   });
+
+  return pick;
 }

@@ -457,6 +457,18 @@ export class FaceRig {
     }
   }
 
+  /**
+   * Rescales the whole face for a new canvas size.
+   *
+   * Everything is drawn on a 1920×1080 artboard, so a size change is one number
+   * for the rig; the canvas buffer, the tick rate and the v4l2 format are the
+   * other halves of the same change (see `applyOutput` in `stream.ts`).
+   */
+  setScale(scale: number): this {
+    this.root.scale.set(scale);
+    return this;
+  }
+
   /** 0 = eyes open, 1 = shut. Closes both shells; the mask trims the iris. */
   setEyeClose(amount: number, side?: Side): this {
     if (side) {

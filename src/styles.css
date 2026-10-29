@@ -648,6 +648,100 @@ body[data-mode="manual"] .calibrate-group {
 }
 
 /*
+ * The settings section: one row per stored value, painted from the store. It
+ * sits above the key map in the scrolling body, so the fold and the small
+ * window leave it reachable first.
+ */
+.settings {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--subtext0);
+  font-size: 11px;
+}
+
+.settings h2 {
+  margin: 6px 0 2px;
+  color: var(--overlay0);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.setting-row {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  gap: 6px;
+  align-items: center;
+}
+
+.setting-row > span {
+  color: var(--overlay1);
+  white-space: nowrap;
+}
+
+.setting-row select {
+  min-width: 0;
+  padding: 3px 5px;
+  border: 1px solid rgb(137 180 250 / 22%);
+  border-radius: 4px;
+  background: rgb(17 17 27 / 82%);
+  color: var(--subtext1);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.setting-row input[type="checkbox"] {
+  justify-self: start;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.setting-row select:focus-visible,
+.setting-row input:focus-visible,
+.origin-button:focus-visible {
+  outline: 1px solid var(--blue);
+  outline-offset: 1px;
+}
+
+/* Between the write and the restarted stream: nothing here may be clicked. */
+.settings.busy {
+  opacity: 0.55;
+}
+
+.origin-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.origin-button {
+  min-width: 0;
+  padding: 3px 4px;
+  border: 1px solid rgb(137 180 250 / 18%);
+  border-radius: 4px;
+  background: rgb(17 17 27 / 82%);
+  color: var(--overlay1);
+  font: inherit;
+  font-size: 10px;
+  text-align: center;
+  cursor: pointer;
+}
+
+/* The centre sits under the two top corners, where it is on the screen. */
+.origin-button[data-anchor="center"] {
+  grid-column: span 2;
+}
+
+.origin-button.active {
+  border-color: rgb(137 180 250 / 60%);
+  color: var(--blue);
+}
+
+/*
  * The shortcut legend, at the bottom of the dock's scrolling body. It is part
  * of the column now: the canvas never has a control floating over it.
  */

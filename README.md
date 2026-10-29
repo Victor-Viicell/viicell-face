@@ -45,9 +45,11 @@ both.
 | `src/input.ts` | One control stream from the devices or the focused window |
 | `src/errors.ts` | Device failures → one `AppError` (code, headline, raw detail, fix command), pure and unit tested |
 | `src/hud.ts` | The status row as a pure chip builder over one snapshot: label, state and tooltip per chip (unit tested) |
+| `src/settings_view.ts` | The settings panel's choices and read-backs: sizes, rates, the origin grid, how a size is parsed (unit tested) |
+| `src/settings_panel.ts` | The settings controls: one paint from the store, the restart, the busy state, the fold |
 | `src/layout.ts` | The window as arithmetic: docked column width, the letterboxed 16:9 canvas at a whole-number scale, the face safe area (unit tested) |
 | `src/shell.ts` | The only module that touches element ids: the dock (fold, layout paint), the status row, error panel, hints, calibration panel, look overlay |
-| `src/stream.ts` | The frame pump and the once-a-second health poll against the Rust backend |
+| `src/stream.ts` | The frame pump, `applyOutput` (buffer + scale + rate + writer together) and the once-a-second health poll |
 | `src/controls.ts` | Keys and wheel: posing the face by hand, and picking the gaze origin |
 | `src/track_view.ts` | Camera mode: tracking camera, the full-monitor crosshair, the calibration flow |
 | `src/main.ts` | Boot and wiring: builds the app, the rig and the singletons, connects them |
@@ -530,7 +532,8 @@ or a neutral pose that was captured mid-blink is visible at a glance instead of
 being guessed at from the face alone.
 
 Set `VIICELL_FACE_DEVICE=/dev/videoN` to pick a camera, and
-`VIICELL_MODE=track` to start the app already tracking.
+`VIICELL_MODE=track` to start the app already tracking — the same thing the
+dock's **open in track** row remembers, but for one run only.
 
 ## Global keys
 
@@ -641,8 +644,8 @@ names where its number comes from, or the command that fixes it (see
 
 The window is two columns: the **stage**, where the face is the only thing on
 screen, and a **dock** on the right holding everything that is not the face —
-the camera preview, the calibration presets, the key map, and the status row of
-chips with their fix hints at the bottom.
+the camera preview, the settings rows, the calibration presets, the key map, and
+the status row of chips with their fix hints at the bottom.
 
 The stage letterboxes the canvas to 16:9 at a whole-number scale (16 × *k* by
 9 × *k* pixels), centred, so the face is never stretched, never lands on a half
@@ -736,8 +739,27 @@ keep using the camera.
 
 ## Changing the output
 
-The resolution and frame rate the camera broadcasts at are **saved settings**, not
-constants. They are stored as one JSON file:
+The size and frame rate the camera broadcasts at are **saved settings**, and the
+dock's **Output** rows change them:
+
+| Row | What it does | When it applies |
+| --- | --- | --- |
+| **size** | 1920×1080, 1280×720, 960×540, 640×360 | immediately: the canvas buffer, the rig scale and the v4l2 format all change, and the stream restarts |
+| **rate** | 60, 30, 24, 15 fps | immediately, same restart |
+| **origin** | the five points the eyes look *from* (same as hold `0` + `1`–`5`) | immediately, in both modes |
+| **open in track** | whether the app opens in facial-tracking mode | next start (the `VIICELL_MODE` env var still wins for one run) |
+
+A saved size that is not one of the four is kept and shown as an extra entry
+first rather than rewritten, so a hand-edited `settings.json` is never silently
+replaced by a preset.
+
+While a size or rate change is being applied the controls are disabled and the
+status strip says `starting…`: the writer thread is torn down and the device is
+re-opened at the new format, which takes a moment. A failure lands in the error
+panel, and the values you asked for are still what the store holds — the next
+retry starts the stream at them.
+
+Everything lives in one JSON file:
 
 ```
 ~/.config/com.viicell.viicell-face/settings.json          # Linux
@@ -751,7 +773,9 @@ and the v4l2 format are all started from the numbers it holds.
 
 * Keep width/height **even** (YUYV 4:2:2 needs pixel pairs) and within the
   device's `max_width`/`max_height` (1920×1080 with the recommended setup). Odd
-  or out-of-range values are rounded and clamped to fit rather than refused.
+  or out-of-range values are rounded and clamped to fit rather than refused —
+  in the panel and in the store, so a size that came from anywhere is legal
+  before it reaches Rust.
 * `fps` is clamped to 1–120.
 * Unknown keys and fields from another version are ignored; a value of the wrong
   type falls back to its default on its own, so one bad edit never resets the
@@ -761,13 +785,18 @@ and the v4l2 format are all started from the numbers it holds.
   `src/config.ts` re-exports the output size from there, so there is one place to
   change them.
 
-The same file also carries the pieces the app has no panel for yet: the loopback
-device path, the webcam path, the gaze origin (saved when you pick it with the
-number keys), the pupil accent, the start mode, the window size/position, and
-the dock's width and folded flag (saved when you fold it). They are validated
-the same way and written debounced, so a burst of changes is a single write.
-Only the gaze origin and the dock's fold flag are wired up so far — the rest are
-groundwork for the settings panel.
+The same file also carries the window size/position and the dock's width and
+folded flag (saved when you fold it). They are validated the same way and written
+debounced, so a burst of changes is a single write. Three keys are groundwork
+with no control yet: `deviceId` (the loopback device — `start_camera` still picks
+one itself, and `VIICELL_VIDEO_DEVICE` overrides), `cameraId` (the tracking
+webcam) and `accent` (the pupil colour — nothing in the rig reads it yet).
+
+The panel is `src/settings_panel.ts` (listeners, one paint, the busy state); the
+choices and how a stored value reads back are in `src/settings_view.ts`, which is
+what `bun test` pins. Every control writes through `SettingsStore.set()` and
+paints from the store, never from the click — which is why changing the origin
+with a key moves the panel's active button too.
 
 The artwork lives in `src/face/art.ts` (paths and fills) and
 `src/face/skeleton.ts` (pivots/parents). Re-exporting `viicell-faces.svg` means

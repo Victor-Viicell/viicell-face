@@ -41,6 +41,37 @@
              camera. It moves into the calibration panel and back. -->
         <canvas id="debug-camera" class="debug-camera" aria-hidden="true" hidden></canvas>
 
+        <!-- What the app remembers, and the only way to change it without
+             editing settings.json: the size and rate the camera broadcasts at
+             (changing either restarts the stream), the point the eyes look
+             from, and how the app opens. Painted from the store, written to the
+             store; `src/settings_panel.ts` owns the wiring. -->
+        <section id="settings" class="settings" aria-label="Settings">
+          <h2>Output</h2>
+          <label class="setting-row" for="setting-size">
+            <span>size</span>
+            <select id="setting-size" title="The size the camera broadcasts at"></select>
+          </label>
+          <label class="setting-row" for="setting-fps">
+            <span>rate</span>
+            <select id="setting-fps" title="Frames per second the camera is kept at"></select>
+          </label>
+          <h2>Face</h2>
+          <div class="setting-row">
+            <span>origin</span>
+            <div
+              id="setting-origin"
+              class="origin-grid"
+              role="group"
+              aria-label="Where the eyes look from"
+            ></div>
+          </div>
+          <label class="setting-row" for="setting-start-track">
+            <span>open in track</span>
+            <input id="setting-start-track" type="checkbox" />
+          </label>
+        </section>
+
         <div id="calibrate" class="calibrate-group">
           <button
             class="calibrate-button"

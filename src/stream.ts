@@ -5,6 +5,8 @@ import { cameraStatus, pushFrame, startCamera } from "./camera";
 import { BACKGROUND } from "./config";
 import { classify, type AppError } from "./errors";
 import type { CalibrationKind } from "./face/calibration";
+import { ARTBOARD } from "./face/art";
+import type { FaceRig } from "./face/rig";
 import { faceCameraStatus } from "./face_camera";
 import { statusChips, type FaceNote, type MicNote } from "./hud";
 import { keysAreGlobal } from "./input";
@@ -84,6 +86,35 @@ export async function startStream(app: Application, overlay: Container): Promise
     app.ticker.update(performance.now());
     pumpFrame(captureFrame);
   });
+}
+
+/**
+ * A new size or rate, applied to everything that has to agree on it.
+ *
+ * The canvas buffer, the rig's scale, the ticker rate and the v4l2 format are
+ * one decision: frames are read back at the canvas size and the device is told
+ * the same format in the same breath, so a half-applied change would ship
+ * frames of the wrong length. `start_camera` tears the old writer down when the
+ * size or rate differs, and `connect()` re-reads the store, so the order here is
+ * buffer → scale → rate → writer.
+ *
+ * Without Tauri there is no ticker and no writer, so the browser preview only
+ * takes the first two steps (it is where the layout gets eyeballed).
+ */
+export async function applyOutput(
+  app: Application,
+  rig: FaceRig,
+  settings: SettingsStore,
+): Promise<void> {
+  const { width, height, fps } = settings.value("output");
+  app.renderer.resize(width, height);
+  rig.setScale(width / ARTBOARD.width);
+
+  if (installed === null) {
+    return;
+  }
+  void invoke("set_tick_rate", { fps });
+  await connect();
 }
 
 /** Claims the loopback device at the size and rate the settings ask for. */

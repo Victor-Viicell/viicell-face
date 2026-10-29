@@ -35,6 +35,12 @@ export const calibrationCancel = q<HTMLButtonElement>("#calibration-cancel");
 export const calibrateButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-calibration]")];
 /** The fold toggle of the docked column; `main.ts` wires its click. */
 export const panelToggle = q<HTMLButtonElement>("#panel-toggle");
+/** The settings section and its controls; `settings_panel.ts` owns the wiring. */
+export const settingsPanel = q<HTMLElement>("#settings");
+export const settingSize = q<HTMLSelectElement>("#setting-size");
+export const settingFps = q<HTMLSelectElement>("#setting-fps");
+export const settingOrigin = q<HTMLElement>("#setting-origin");
+export const settingStartTrack = q<HTMLInputElement>("#setting-start-track");
 /** The scrolling half of the dock; the camera preview docks here between runs. */
 const panelBody = q<HTMLElement>("#panel-body");
 /** The camera preview canvas; it moves into the calibration panel and back. */
@@ -110,6 +116,22 @@ export function installLayout(state: () => LayoutState): void {
 /** Repaints the layout after the store changed under it (fold, width). */
 export function relayout(): void {
   paintLayout();
+}
+
+/**
+ * The settings controls while a change is being applied.
+ *
+ * Changing the size or rate tears the writer down and opens a new format, which
+ * is seconds on a loopback device; a second click in that window would race it.
+ * The HUD says `starting…` at the same time, so the busy state is visible twice.
+ */
+export function setSettingsBusy(busy: boolean): void {
+  settingsPanel.classList.toggle("busy", busy);
+  for (const control of settingsPanel.querySelectorAll<
+    HTMLSelectElement | HTMLInputElement | HTMLButtonElement
+  >("select, input, button")) {
+    control.disabled = busy;
+  }
 }
 
 /**

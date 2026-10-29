@@ -16,8 +16,9 @@ import { startInput } from "./input";
 import { faceMode, setFaceMode, startupFaceMode, subscribeMode } from "./mode";
 import { stopFaceCamera } from "./face_camera";
 import { SettingsStore, type SettingsAdapter } from "./settings";
+import { installSettingsPanel } from "./settings_panel";
 import * as shell from "./shell";
-import { connect, installStream, refreshStatus, startStream } from "./stream";
+import { applyOutput, connect, installStream, refreshStatus, startStream } from "./stream";
 import { TrackView } from "./track_view";
 
 /**
@@ -130,7 +131,10 @@ async function boot(): Promise<void> {
 
   // Controls: read from the devices themselves while the app runs, so posing
   // the face does not need the window (or the user's attention).
-  setupGazeControls(gaze, settings);
+  const setOrigin = setupGazeControls(gaze, settings);
+  // The dock's settings and the fold live in one module; the restart path is
+  // handed in, because only this file holds the canvas and the rig.
+  installSettingsPanel(settings, { reconnect: () => applyOutput(app, rig, settings), setOrigin });
   shell.fillInputHint();
   void startInput();
 
@@ -203,25 +207,20 @@ async function boot(): Promise<void> {
   await connect();
   window.setInterval(() => void refreshStatus(), 1000);
 
-  // `VIICELL_MODE=track bun run tauri dev` opens straight into tracking, which
-  // is handy when the keys are not at hand yet.
-  const startMode = await startupFaceMode();
+  // The setting decides how the app opens; `VIICELL_MODE=track bun run tauri dev`
+  // still wins, because the env var is the power-user override for one run.
+  const startMode = (await startupFaceMode()) ?? settings.value("startMode");
   if (startMode === "track") {
     setFaceMode("track");
   }
 }
 
-/** The panel's own buttons: retry, copy a fix, dismiss, the calibrations, the fold. */
+/** The panel's own buttons: retry, copy a fix, dismiss, the calibrations. */
 function wireButtons(): void {
   shell.retryButton.addEventListener("click", () => void connect());
   shell.errorCopy.addEventListener("click", () => void shell.copyErrorFix());
   shell.errorDismiss.addEventListener("click", () => shell.dismissProblem());
   shell.inputHintCopy.addEventListener("click", () => void shell.copyInputFix());
-  // Folding is one stored flag; the paint follows the store, not the click.
-  shell.panelToggle.addEventListener("click", () => {
-    settings.set({ panel: { collapsed: !settings.value("panel").collapsed } });
-    shell.relayout();
-  });
   for (const button of shell.calibrateButtons) {
     button.addEventListener("click", () =>
       trackView?.startCalibration(button.dataset.calibration as CalibrationKind),

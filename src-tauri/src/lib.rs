@@ -5,6 +5,7 @@ mod pointer;
 mod ticker;
 mod virtual_camera;
 
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -172,6 +173,69 @@ fn set_tick_rate(ticker: State<'_, Ticker>, fps: u32) {
     ticker.set_rate(fps);
 }
 
+/// The one file the app remembers itself in: `<app config dir>/settings.json`.
+///
+/// The frontend owns the shape (`src/settings.ts`); Rust only stores the text,
+/// so a settings field can be added without touching this side.
+fn settings_file(dir: &Path) -> PathBuf {
+    dir.join("settings.json")
+}
+
+/// Reads the settings text, or `None` when the app has never saved any.
+fn read_settings_at(path: &Path) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("could not read {}: {error}", path.display())),
+    }
+}
+
+/// Replaces the settings file in one step.
+///
+/// The payload is validated as JSON first and written to a sibling temp file
+/// that is then renamed over the original, so a crash or a full disk leaves the
+/// previous settings intact instead of a truncated file the next boot would
+/// discard.
+fn write_settings_at(path: &Path, text: &str) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(text)
+        .map_err(|error| format!("settings payload is not JSON: {error}"))?;
+
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|error| format!("could not create {}: {error}", dir.display()))?;
+    }
+
+    let temp = path.with_extension("json.tmp");
+    std::fs::write(&temp, text)
+        .map_err(|error| format!("could not write {}: {error}", temp.display()))?;
+    std::fs::rename(&temp, path)
+        .map_err(|error| format!("could not replace {}: {error}", path.display()))?;
+
+    Ok(())
+}
+
+/// The saved settings text; `null` on the very first run.
+#[tauri::command]
+fn read_settings(app: AppHandle) -> Result<Option<String>, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("no app config directory: {error}"))?;
+
+    read_settings_at(&settings_file(&dir))
+}
+
+/// Stores the settings text the frontend serialised.
+#[tauri::command]
+fn write_settings(app: AppHandle, text: String) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("no app config directory: {error}"))?;
+
+    write_settings_at(&settings_file(&dir), &text)
+}
+
 /// Puts the window in and out of fullscreen for the full-monitor look overlay.
 ///
 /// The gaze crosshair and the calibration marks are positions on the monitor,
@@ -301,6 +365,8 @@ pub fn run() {
             face_frame,
             startup_mode,
             microphone_status,
+            read_settings,
+            write_settings,
             input_global,
             set_tick_rate,
             set_fullscreen,
@@ -360,4 +426,95 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A throwaway directory for the file tests; removed by `scratch`.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "viicell-settings-{name}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|elapsed| elapsed.as_nanos())
+                    .unwrap_or(0)
+            ));
+            Scratch(dir)
+        }
+
+        fn file(&self) -> PathBuf {
+            settings_file(&self.0)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn settings_live_in_one_file_in_the_config_dir() {
+        let file = settings_file(Path::new("/home/someone/.config/com.viicell.face"));
+        assert_eq!(file, Path::new("/home/someone/.config/com.viicell.face/settings.json"));
+    }
+
+    #[test]
+    fn a_first_run_has_no_settings() {
+        let scratch = Scratch::new("missing");
+        assert_eq!(read_settings_at(&scratch.file()), Ok(None));
+    }
+
+    #[test]
+    fn what_is_written_reads_back_unchanged() {
+        let scratch = Scratch::new("roundtrip");
+        let text = "{\n  \"version\": 1,\n  \"accent\": \"#89b4fa\"\n}\n";
+
+        write_settings_at(&scratch.file(), text).expect("write");
+
+        assert_eq!(read_settings_at(&scratch.file()), Ok(Some(text.to_string())));
+        // The temp file is renamed into place, never left behind.
+        assert!(!scratch.file().with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn writing_creates_the_config_directory() {
+        let scratch = Scratch::new("mkdir");
+        let nested = settings_file(&scratch.0.join("nested").join("deeper"));
+
+        write_settings_at(&nested, "{}").expect("write");
+
+        assert!(nested.exists());
+    }
+
+    #[test]
+    fn a_payload_that_is_not_json_never_reaches_the_disk() {
+        let scratch = Scratch::new("invalid");
+        write_settings_at(&scratch.file(), "{\"version\": 1}").expect("first write");
+
+        let error = write_settings_at(&scratch.file(), "{not json").expect_err("refused");
+
+        assert!(error.contains("not JSON"), "{error}");
+        // The good file is still there, untouched.
+        assert_eq!(read_settings_at(&scratch.file()), Ok(Some("{\"version\": 1}".to_string())));
+    }
+
+    #[test]
+    fn a_write_replaces_the_previous_settings() {
+        let scratch = Scratch::new("replace");
+
+        write_settings_at(&scratch.file(), "{\"version\": 1}").expect("first");
+        write_settings_at(&scratch.file(), "{\"version\": 1, \"fps\": 60}").expect("second");
+
+        assert_eq!(
+            read_settings_at(&scratch.file()),
+            Ok(Some("{\"version\": 1, \"fps\": 60}".to_string()))
+        );
+    }
 }

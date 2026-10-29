@@ -254,7 +254,9 @@ With the centre origin, a cursor on the left edge is a full look to the left. Fr
 the top-left origin that same cursor sits on the origin, so the eyes look straight
 ahead; the far bottom-right corner is the full look. A corner origin therefore
 sweeps more gently and reads as a face standing in that corner, watching the
-pointer. With no cursor at all the eyes settle on the middle of the screen.
+pointer. With no cursor at all the eyes settle on the middle of the screen. The
+origin you pick is saved and comes back on the next start (see
+[Changing the output](#changing-the-output)).
 
 In `mode track` the origin works on the tracked gaze instead: the face still
 looks where you look, but it is drawn as if it stood at the chosen corner, so
@@ -646,9 +648,37 @@ keep using the camera.
 
 ## Changing the output
 
-Resolution and frame rate live in `src/config.ts`; keep the width/height even
-(YUYV 4:2:2 needs pixel pairs) and within the device's `max_width`/`max_height`
-(1920×1080 with the recommended setup).
+The resolution and frame rate the camera broadcasts at are **saved settings**, not
+constants. They are stored as one JSON file:
+
+```
+~/.config/com.viicell.viicell-face/settings.json          # Linux
+%APPDATA%\com.viicell.viicell-face\settings.json          # Windows
+```
+
+(`src-tauri` resolves the directory with Tauri's `app.path().app_config_dir()`.)
+Edit it while the app is closed, or delete it to go back to the defaults; the
+file is read once at boot, and the canvas buffer, the rig scale, the frame pump
+and the v4l2 format are all started from the numbers it holds.
+
+* Keep width/height **even** (YUYV 4:2:2 needs pixel pairs) and within the
+  device's `max_width`/`max_height` (1920×1080 with the recommended setup). Odd
+  or out-of-range values are rounded and clamped to fit rather than refused.
+* `fps` is clamped to 1–120.
+* Unknown keys and fields from another version are ignored; a value of the wrong
+  type falls back to its default on its own, so one bad edit never resets the
+  rest of the file. A corrupt file is read as "no settings" and left alone until
+  something actually changes.
+* The default values live in `src/settings.ts` (`DEFAULT_SETTINGS`);
+  `src/config.ts` re-exports the output size from there, so there is one place to
+  change them.
+
+The same file also carries the pieces the app has no panel for yet: the loopback
+device path, the webcam path, the gaze origin (saved when you pick it with the
+number keys), the pupil accent, the start mode and the window size/position. They
+are validated the same way and written debounced, so a burst of changes is a
+single write. Only the gaze origin is wired up so far — the rest are groundwork
+for the settings panel.
 
 The artwork lives in `src/face/art.ts` (paths and fills) and
 `src/face/skeleton.ts` (pivots/parents). Re-exporting `viicell-faces.svg` means

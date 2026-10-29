@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { cameraStatus, pushFrame, startCamera, stopCamera } from "./camera";
 import { BACKGROUND, FACE_TRACKING, OUTPUT } from "./config";
+import { SettingsStore, type SettingsAdapter } from "./settings";
 import { type CalibrationKind, lookTarget } from "./face/calibration";
 import { ARTBOARD, MOUTH } from "./face/art";
 import { CameraDebugView } from "./face/debug_view";
@@ -12,7 +13,7 @@ import { FaceRig } from "./face/rig";
 import { FaceTracker } from "./face/tracker";
 import { FaceTracking } from "./face/tracking";
 import { faceCameraStatus, nextFaceFrame, startFaceCamera, stopFaceCamera } from "./face_camera";
-import { GAZE_ANCHORS, Gaze } from "./gaze";
+import { GAZE_ANCHORS, Gaze, type GazeAnchor } from "./gaze";
 import { keysAreGlobal, startInput, subscribeInput } from "./input";
 import { LookOverlay } from "./look_overlay";
 import {
@@ -63,12 +64,30 @@ const modeRow = document.querySelector<HTMLElement>("#mode-row");
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 
+/**
+ * The persisted settings, read once at boot.
+ *
+ * Only Tauri has a file to read: the browser preview keeps the defaults in
+ * memory, so it can never pass for a saved configuration. `frameInterval` is
+ * derived from these numbers below — a field access, never a read on the frame
+ * path.
+ */
+const settings = new SettingsStore(isTauri ? tauriSettingsAdapter() : null);
+
+/** The Rust side stores the text; the shape of it lives in `./settings`. */
+function tauriSettingsAdapter(): SettingsAdapter {
+  return {
+    read: () => invoke<string | null>("read_settings"),
+    write: (text) => invoke<void>("write_settings", { text }),
+  };
+}
+
 /** Whether frames should be shipped to the virtual camera right now. */
 let streaming = false;
 /** Guards against queueing frames faster than the backend can take them. */
 let pushing = false;
 let lastPush = 0;
-const frameInterval = 1000 / OUTPUT.fps;
+let frameInterval = 1000 / OUTPUT.fps;
 
 /** Owns the microphone and the mouth line; created once the app is up. */
 let mouth: SynthMouth | null = null;
@@ -111,11 +130,19 @@ let lastTrackAt = 0;
 let lastTrackHint: string | null = null;
 
 async function boot() {
+  // The saved settings are read before anything depends on them: the canvas
+  // buffer, the rig scale, the ticker rate and the v4l2 format all have to
+  // agree, and the device only accepts one size at a time.
+  const saved = await settings.load();
+  const output = saved.output;
+  frameInterval = 1000 / output.fps;
+  gaze.setOrigin(saved.gazeOrigin);
+
   const app = new Application();
   await app.init({
     canvas,
-    width: OUTPUT.width,
-    height: OUTPUT.height,
+    width: output.width,
+    height: output.height,
     background: BACKGROUND,
     antialias: true,
     resolution: 1,
@@ -126,7 +153,7 @@ async function boot() {
 
   // The face rig is the canvas the camera broadcasts. Posing a bone
   // (`rig.bones.eyeLeftIris.moveBy(...)`) shows up in the next frame.
-  const rig = new FaceRig(OUTPUT.width / ARTBOARD.width);
+  const rig = new FaceRig(output.width / ARTBOARD.width);
   app.stage.addChild(rig.root);
 
   // A DOM canvas over the face, so the preview can never be read back into the
@@ -215,7 +242,7 @@ async function boot() {
   // waits on compositor frame callbacks, and a window on another workspace gets
   // none, which drops the face to about 1 fps and freezes the camera there.
   app.ticker.stop();
-  void invoke("set_tick_rate", { fps: OUTPUT.fps });
+  void invoke("set_tick_rate", { fps: output.fps });
 
   const captureFrame = createFrameSource(app, rig.skeleton);
   await listen("frame-tick", () => {
@@ -237,6 +264,9 @@ async function boot() {
     closeCalibration();
   });
   window.addEventListener("beforeunload", () => {
+    // Best effort: a setting changed in the last debounce window should not be
+    // the one that goes missing on quit.
+    void settings.save();
     void stopCamera();
     void stopFaceCamera().catch(() => {});
   });
@@ -312,8 +342,11 @@ async function connect() {
   hideError();
   setHud("starting", "looking for a virtual camera…");
 
+  // Whatever the store holds now — after boot it is the saved config.
+  const output = settings.value("output");
+
   try {
-    const info = await startCamera(OUTPUT.width, OUTPUT.height, OUTPUT.fps);
+    const info = await startCamera(output.width, output.height, output.fps);
     streaming = true;
     setHud(
       "live",
@@ -1275,10 +1308,19 @@ function setupFaceControls(app: Application, rig: FaceRig): { reapply: () => voi
  * pupils in manual mode and the tracked gaze drives them in camera mode; either
  * way the origin only changes the angle they see the screen at, not what they
  * are following. Tap `0` on its own to put the origin back in the middle.
+ *
+ * The origin is saved, because it is picked once for a whole call and having to
+ * pick it again after every restart was the thing people forgot.
  */
 function setupGazeControls() {
   let held = false;
   let picked = false;
+
+  /** Moves the origin and remembers it; the store writes it a beat later. */
+  const pick = (origin: GazeAnchor) => {
+    gaze.setOrigin(origin);
+    settings.set({ gazeOrigin: origin });
+  };
 
   subscribeInput((input) => {
     // The origin applies to both modes: the cursor mode re-centres the pointer,
@@ -1294,7 +1336,7 @@ function setupGazeControls() {
       } else {
         held = false;
         if (!picked) {
-          gaze.setOrigin("center");
+          pick("center");
         }
       }
       return;
@@ -1310,7 +1352,7 @@ function setupGazeControls() {
     }
 
     picked = true;
-    gaze.setOrigin(GAZE_ANCHORS[index]);
+    pick(GAZE_ANCHORS[index]);
   });
 
   window.addEventListener("blur", () => {

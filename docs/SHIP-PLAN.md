@@ -27,7 +27,7 @@ Ticket format: **goal** — *acceptance* (the thing that must be true) — files
   missing udev rule each render a distinct panel with one action button.
   — `src/errors.ts`, `src/errors.test.ts`, `index.html`, `main.ts`
 
-- [ ] **VF-005 split `main.ts`** — 1322 lines is the reason the UI is rough.
+- [x] **VF-005 split `main.ts`** — 1322 lines is the reason the UI is rough.
   Extract, with no behaviour change: `shell.ts` (DOM refs + panels),
   `stream.ts` (connect/pump/push, fps accounting), `controls.ts` (keys/wheel),
   `hud.ts` (status text + chips). `main.ts` becomes boot + wiring only (<250

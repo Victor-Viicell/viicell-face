@@ -67,10 +67,6 @@ export class TrackView {
     return this.#calibrating;
   }
 
-  get faceError(): string | null {
-    return this.#faceError;
-  }
-
   /** The mode switched to tracking: open the camera and the model. */
   enter(): void {
     this.deps.preview()?.showMessage(shell.CAMERA_WAITING_MESSAGE);

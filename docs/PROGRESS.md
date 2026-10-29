@@ -98,3 +98,60 @@ changed, what was verified and how, what was NOT verified.
   standard remedy for "the device is there but will not open", not something
   measured here. `gstreamer_missing` has no producer today (nothing in the app
   calls `getUserMedia`); the code exists so the webview capture path has a home.
+
+## 2026-10-29 — session 3 — VF-005 split `main.ts`
+
+* **Changed**: `main.ts` went from 1514 to 232 lines. The move, in files that
+  name what they are (same code, same strings, same event order — no behaviour
+  change):
+  * `src/shell.ts` (309) — every element id, and the panels that read them: HUD
+    (`setHud`), mode row (`applyModeUi`, which also clears the dismissed set —
+    the state stayed next to its clearing sites), error panel
+    (`setPanelProblem`/`showError`/`hideError`/`dismissProblem`/`copyErrorFix`/
+    `copyInputFix`/`fillInputHint`) with `dismissed` private to the module plus
+    `clearDismissed()`/`forgetDismissed(...)`, track hint, calibration panel
+    (`paintCalibration` takes six finished strings; `openCalibrationPanel`/
+    `closeCalibrationPanel` also move the preview canvas in and out), row
+    highlights, the `looking` body class, and the one `LookOverlay` instance.
+  * `src/hud.ts` (90) — `statusLine(snapshot)`: the status sentence as a pure
+    function over `{mode, device, format, fps, in/dropped, eyes, keys, mic,
+    face, lowLightGain}`. It appends the low-light lift only in tracking mode,
+    and says `face ?` without a lift when the poll itself failed.
+  * `src/stream.ts` (286) — `installStream(isTauri, settings, sources)`,
+    `startStream` (ticker stop, `set_tick_rate`, frame-tick listener),
+    `connect`, the unchanged `pumpFrame`/`createFrameSource`, and
+    `refreshStatus` (the one-second poll, the attention marks, `micProblem`).
+    The pump is byte-for-byte the old one, still allocation-free.
+  * `src/controls.ts` (583) — `setupFaceControls(app, rig, hooks)` with the
+    whole key/wheel/blink/size table, and `setupGazeControls(gaze, settings)`.
+    The two things it cannot own (`R` → calibrate, `T` → preview, `G` →
+    crosshair, and "is the panel open") come in as `FaceControlHooks`.
+  * `src/track_view.ts` (456) — `TrackView`: camera mode as a class. Owns the
+    tracking pull (`pump`), `begin`/`enter`/`leave`, the track hint text, the
+    full-monitor crosshair and its fullscreen dance, and the calibration flow
+    (`startCalibration`/`renderCalibration`/`advanceCalibration`/
+    `closeCalibration`) with all of its panel state.
+  * `src/main.ts` — boot, the singletons (`settings`, `gaze`, `tracker`,
+    `lowLight`, `tracking`, `mouth`, `cameraDebug`, `trackView`), the mode
+    subscription, the ticker callback, `wireButtons()`, `beforeunload`.
+  * `src/main.test.ts` (new) — fails if `main.ts` passes 250 lines or looks up
+    an element, so the split cannot be undone by the next session.
+  * `README.md` — the file map lists the five new modules and `main.ts` is
+    described as boot + wiring; the backdrop paragraph credits `stream.ts` for
+    advancing the clock.
+* **Decision**: the calibration flow lives in `track_view.ts`, not `main.ts`.
+  Boot alone is ~120 lines and calibration another 137, so VF-015's "rework
+  `src/main.ts` (calibration)" cannot coexist with a 250-line main.ts. VF-010
+  and VF-015 should treat `src/track_view.ts` + `src/styles.css` as the files.
+* **Verified**: `scripts/check.sh` → CHECK GREEN (`tsc --noEmit` clean;
+  `bun test` 230 pass across 13 files — 10 new in `hud.test.ts` pinning whole
+  status strings, 2 in `main.test.ts`; `vite build` ok; `cargo test --lib` and
+  `cargo check` ok). Windows compile gate still SKIP (no target installed).
+  The ids the new modules query were checked against `index.html` by hand (all
+  34 present), because a wrong id is a runtime null that `tsc` cannot see.
+* **Not verified**: the app itself was never launched — no display in this
+  session. So "frames still flow" rests on `vite build` plus the pump being an
+  unchanged function, not on a frame reaching `/dev/video10`. The first session
+  with a screen must run `bun run tauri dev` and confirm: a live HUD line, a
+  camera that starts on retry, `T`/`G`/`Z`+wheel still posing, and a mouth
+  calibration that opens and closes the panel with the preview inside it.

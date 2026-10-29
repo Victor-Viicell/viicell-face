@@ -2,7 +2,7 @@
 
 **Take: VF-005 — split `main.ts`.**
 
-Why next: two sessions in a row added to the same file. `main.ts` is now ~1390
+Why next: two sessions in a row added to the same file. `main.ts` is now 1514
 lines and holds the frame pump, the mode switch, the HUD, the calibration flow,
 the settings boot wiring and — since VF-004 — the error panel state machine
 (`panelProblem`, `dismissed`, `setPanelProblem`, `dismissProblem`,
@@ -29,7 +29,7 @@ VF-010 will be written inside a god-file and thrown away.
      concatenation) as a **pure function** with unit tests: pass a status
      snapshot + mic/face/keys state, get the string back. This is the part worth
      testing and the part VF-011 replaces, so keep it tiny.
-4. `main.ts` ends as boot + wiring, under 250 lines.
+4. `main.ts` ends as boot + wiring, under 250 lines (it is 1514 today).
 5. Keep `errors.ts` pure: `shell.ts` may import it, it may never import DOM.
 6. `scripts/check.sh`, commit, rewrite this file, append `docs/PROGRESS.md`,
    `scripts/agent-lock.sh stop`.

@@ -45,7 +45,7 @@ Ticket format: **goal** — *acceptance* (the thing that must be true) — files
   safe area and no control is clipped; layout maths unit-tested.
   — `index.html`, `src/styles.css`, `src/shell.ts`
 
-- [ ] **VF-011 status bar** — one row of chips: mode, device + format, measured
+- [x] **VF-011 status bar** — one row of chips: mode, device + format, measured
   fps, dropped frames, mic, face camera, keys(global/window), origin. Colour =
   state (ok/warn/off), tooltip = the fix. *Acceptance:* each chip has a
   documented source and updates from the existing status polls; no text jumps.

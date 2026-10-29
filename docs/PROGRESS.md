@@ -215,3 +215,59 @@ changed, what was verified and how, what was NOT verified.
   dialog at its new centred position. At 640×360 the dock body scrolls (271 px
   visible of 438): 14 key rows cannot fit in 360 px, so the key map scrolls
   rather than being clipped by anything — VF-014 removes it anyway.
+
+## 2026-10-29 — session 5 — VF-011 status bar
+
+* **Changed**: the one long status sentence at the foot of the dock is a row of
+  eight chips, one per fact, each with its own state and tooltip.
+  * `src/hud.ts` (rewritten, 305) — `statusLine()` **deleted**;
+    `statusChips(snapshot)` returns `Chip[]` (`{key, label, state, tooltip}`) in
+    a fixed order: mode, device, fps, dropped, mic, face, keys, origin. `ChipKey`
+    is a union so `shell.ts` keys its nodes by it and a typo is a type error.
+    Thresholds: `FPS_WARN_BELOW = 20` (below that a call stutters); drops are a
+    warning at > 0; everything else is a device state, not a number.
+  * Tooltips are the documented source or the fix, and the fixes are imported:
+    `inputDenied().fix` for `keys window` and the newly exported `MIC_FIX` for
+    `mic off` — `src/errors.ts` is still the only place a command lives.
+  * `src/shell.ts` (404) — `setHudChips(chips)` paints the row into
+    `#hud-chips`, reusing one node per key and writing text/state/title only
+    when they changed; `hud.dataset.state` is the worst chip's, and `HudState`
+    gained `warn` so the folded dot goes yellow. `setHud(state, text)` keeps the
+    one-line slot (cold start, camera stopped, backend unreachable, preview,
+    failure headline), hides the row, and now sets the line's `title` because
+    the sentence ellipsises in 295 px.
+  * `src/stream.ts` — the poll calls `setHudChips(statusChips({…}))`;
+    `connect()`'s success line stays a message on purpose (it echoes what was
+    *asked for*, `startCamera`'s own reply, not what the writer measured).
+  * `index.html` — `#hud-chips` inside `#hud`, after `#hud-text`.
+  * `src/styles.css` — `#hud-chips` wraps (`flex: 1`, `min-width: 0`, gap 3×4);
+    `.chip` is a 11 px monospace pill with `tabular-nums`, colour from
+    `[data-state]` (green/yellow/grey), `pointer-events: auto` + `cursor: help`
+    so the `title` fires (`.hud` still swallows the pointer otherwise).
+    `body.folded` now hides `#hud-chips` beside `#hud-text`.
+  * `README.md` — new "The status row" section: a table of every chip with the
+    place its number comes from, plus the wrapping/keyed-repaint/folded-dot
+    rules; five old quotes (`eyes camera·top left`, `eyes cursor·monitor`,
+    `lift ×N`, "under the HUD", "status line") now name the chip they live in.
+* **Verified**: `scripts/check.sh` → CHECK GREEN (`tsc --noEmit`; `bun test`
+  276 pass across 14 files — `src/hud.test.ts` rewritten, 25 tests, +15 net;
+  `vite build`; `cargo test --lib`; `cargo check`). Windows gate still SKIP.
+  Geometry measured in Chromium against `vite preview` with the real chip
+  labels: 1280×720 and 1920×1080 → 295 px foot, 3 rows, 78 px tall, widest chip
+  197 px, 0 chips past the hud's edge; 640×360 → 234 px foot, 5 rows, 124 px
+  tall, still 0 overflow; folded → row and line both `display: none`, hud 19×26,
+  dot `rgb(249,226,175)` with `data-state="warn"`. The painter itself was
+  exercised through `vite` dev by importing the real modules into the page
+  (`await import('/src/shell.ts')`): 8 chips with the expected labels/states,
+  the first node identical after a repaint (12 fps → `12 fps`+`warn`,
+  `0 dropped`+`ok`), all eight `title`s set, `setHud("error", …)` hiding the row
+  and showing the line (clipped, as before — hence the new title), the next
+  `setHudChips` restoring the row. Shell's 38 queried ids were re-checked
+  against `index.html` with `comm` (0 missing).
+* **Not verified**: nothing was run under `bun run tauri dev` — the chip row has
+  never been seen with a real backend behind it, and `camera_status`'s live
+  numbers were simulated, not measured. Tooltips were checked as attributes,
+  not as rendered popups (no hover in a headless measurement). At 640×360 the
+  foot is now 124 px of a 360 px window: that is the key map's problem
+  (VF-014 removes it), but if the strip ever needs to be shorter, the device
+  chip (197 px, size + format) is the one to split.

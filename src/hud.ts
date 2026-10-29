@@ -1,13 +1,32 @@
 /**
- * The status line, as a pure function.
+ * The status row, as a pure function.
  *
- * Everything that measures the stream lives in `./stream`; this file only turns
- * a snapshot of those numbers into the one line under the canvas. Keeping it
- * pure is what lets the text be tested without a browser, and it is the part
- * the chip row (VF-011) replaces — so it stays small on purpose.
+ * Everything that measures the stream lives in `./stream`; this file turns one
+ * snapshot of those numbers into the chips at the foot of the dock — one chip
+ * per fact, each carrying its own state and the fix that would change it. No
+ * DOM, no clock, no Tauri bridge, so `bun test` covers every rule with no
+ * window and no device.
+ *
+ * Two rules the row depends on:
+ *
+ * - **The order and the count are fixed.** The painter reuses one node per
+ *   `key`, so a chip that vanished would reflow the row under the reader. A
+ *   state with nothing to say says so (`face —`) instead of disappearing.
+ * - **The label is the value; the tooltip is the source or the fix.** Hovering
+ *   a yellow or grey chip must tell a person the one command that changes it,
+ *   which is why the fix strings come from `./errors` rather than being
+ *   rewritten here.
+ *
+ * Sources, one per chip: `mode` ← `stream.ts` asks `faceMode()`; `device`,
+ * `fps`, `dropped` ← `camera_status` (the Rust writer's own counters);
+ * `mic` ← the mouth's state; `face` ← `face_camera_status`; `keys` ← whether
+ * the udev rule let the backend open `/dev/input`; `origin` ← the gaze's
+ * anchor and cursor source.
  */
 
-/** How the microphone is doing, as far as the line cares. */
+import { MIC_FIX, inputDenied } from "./errors";
+
+/** How the microphone is doing, as far as the row cares. */
 export type MicNote = "waiting" | "off" | null;
 
 /** What the tracking camera's line says. */
@@ -37,54 +56,250 @@ export interface StatusSnapshot {
   lowLightGain: number;
 }
 
-/** Tells the reader where the tracked eyes come from and how the camera is. */
-function faceNote(face: FaceNote, tracking: boolean, lowLightGain: number): string {
-  if (!tracking) {
-    // The low-light stage only runs on tracked frames; there is nothing to say.
-    return "";
-  }
+/** How a chip reads: fine, worth a look, or not there at all. */
+export type ChipState = "ok" | "warn" | "off";
 
-  let note: string;
-  switch (face.kind) {
-    case "off":
-      return "";
-    case "unknown":
-      // The poll itself failed; the lift is unknown too, so do not guess it.
-      return " · face ?";
-    case "starting":
-      note = " · face starting";
-      break;
-    case "info":
-      note = ` · face ${face.width}×${face.height}${
-        face.failed ? " off" : ` ${face.frames} fr`
-      }`;
-      break;
-  }
+/**
+ * Everything a chip's key can be, in paint order.
+ *
+ * The union is the point: `shell.ts` keys its nodes by it, and a typo in a key
+ * is a type error rather than a chip that appears twice at runtime.
+ */
+export type ChipKey = "mode" | "device" | "fps" | "dropped" | "mic" | "face" | "keys" | "origin";
 
-  // Only worth saying when the low-light stage actually changed the frame.
-  if (lowLightGain > 1.05) {
-    note += ` · lift ×${lowLightGain.toFixed(1)}`;
-  }
-  return note;
+export interface Chip {
+  key: ChipKey;
+  /** What the chip says. Short: eight of these have to fit a 295 px foot. */
+  label: string;
+  state: ChipState;
+  /** Where the number came from, or the command that fixes it. Shown on hover. */
+  tooltip: string;
 }
 
-/** The HUD's live line: mode, device, format, measured rate, inputs, devices. */
-export function statusLine(snapshot: StatusSnapshot): string {
-  const { device, gaze } = snapshot;
-  // `monitor` vs `window` says where the eyes get their cursor from; `window`
-  // also means the keys only work while this window has focus. The camera mode
-  // still names the origin, since the keys move the face there too.
-  const eyes = snapshot.tracking
-    ? `eyes camera·${gaze.label}`
-    : `eyes ${gaze.label}·${gaze.source}`;
-  const keys = snapshot.keysGlobal ? "global" : "window";
-  const mode = snapshot.tracking ? "mode track" : "mode manual";
-  const mic = snapshot.mic === null ? "" : ` · mic ${snapshot.mic}`;
+/**
+ * Below this the output is visibly stuttering.
+ *
+ * A call wants 15–30 fps; under 20 the loopback writer or the compositor is the
+ * limit, not the face, and the person should be told while it happens rather
+ * than after the call.
+ */
+export const FPS_WARN_BELOW = 20;
 
-  return (
-    `${mode} · ${device.label} · ${device.path} · ${snapshot.width}×${snapshot.height} ` +
-    `${snapshot.pixelFormat} · ${snapshot.fps.toFixed(0)} fps · ` +
-    `${snapshot.framesReceived} in · ${snapshot.framesDropped} dropped · ${eyes} · ` +
-    `keys ${keys}${mic}${faceNote(snapshot.face, snapshot.tracking, snapshot.lowLightGain)}`
-  );
+/** The keys fix, from the one module allowed to know commands. */
+const INPUT_FIX = inputDenied().fix ?? "sudo scripts/setup-input-access.sh";
+
+function modeChip(tracking: boolean): Chip {
+  // The key is written out rather than imported from `./mode`, which pulls in
+  // the Tauri bridge; this file stays importable by a plain `bun test`.
+  return tracking
+    ? {
+        key: "mode",
+        label: "track",
+        state: "ok",
+        tooltip: "the webcam drives the face: press M to go back to the keys and the cursor",
+      }
+    : {
+        key: "mode",
+        label: "manual",
+        state: "ok",
+        tooltip: "the keys and the cursor drive the face: press M to track from the webcam",
+      };
+}
+
+function deviceChip(snapshot: StatusSnapshot): Chip {
+  const { device, width, height, pixelFormat } = snapshot;
+  return {
+    key: "device",
+    label: `${device.label} ${width}×${height} ${pixelFormat}`,
+    state: "ok",
+    tooltip: `${device.path} · the virtual camera this app writes to`,
+  };
+}
+
+function fpsChip(snapshot: StatusSnapshot): Chip {
+  const rate = snapshot.fps.toFixed(0);
+  if (snapshot.fps >= FPS_WARN_BELOW) {
+    return {
+      key: "fps",
+      label: `${rate} fps`,
+      state: "ok",
+      tooltip: `measured over the last second · ${snapshot.framesReceived} frames in`,
+    };
+  }
+  if (snapshot.fps > 0) {
+    return {
+      key: "fps",
+      label: `${rate} fps`,
+      state: "warn",
+      tooltip:
+        "below the 20 fps a call needs: close other capture apps, or ask for a " +
+        "smaller output size in settings.json",
+    };
+  }
+  return {
+    key: "fps",
+    label: "0 fps",
+    state: "off",
+    tooltip: "no frame has reached the device: the camera backend is not writing yet",
+  };
+}
+
+function droppedChip(snapshot: StatusSnapshot): Chip {
+  const { framesDropped, framesReceived } = snapshot;
+  if (framesDropped === 0) {
+    return {
+      key: "dropped",
+      label: "0 dropped",
+      state: "ok",
+      tooltip: `${framesReceived} frames in, none dropped`,
+    };
+  }
+  return {
+    key: "dropped",
+    label: `${framesDropped} dropped`,
+    state: "warn",
+    tooltip:
+      `${framesDropped} of ${framesReceived} frames were skipped because a push ` +
+      "outran the frame: close other capture apps, or ask for a lower output rate",
+  };
+}
+
+function micChip(note: MicNote): Chip {
+  if (note === null) {
+    return {
+      key: "mic",
+      label: "mic live",
+      state: "ok",
+      tooltip: "the microphone is open: the mouth follows the room",
+    };
+  }
+  if (note === "waiting") {
+    return {
+      key: "mic",
+      label: "mic waiting",
+      state: "warn",
+      tooltip: "the microphone has not opened yet: allow it in the system dialog",
+    };
+  }
+  return {
+    key: "mic",
+    label: "mic off",
+    state: "off",
+    tooltip: `no microphone: the mouth draws its resting bars — ${MIC_FIX}`,
+  };
+}
+
+function faceChip(face: FaceNote, tracking: boolean, lowLightGain: number): Chip {
+  if (!tracking) {
+    // The tracker never opened a camera in this mode; saying "off" would read
+    // like a failure, so the chip says there is nothing to track from.
+    return {
+      key: "face",
+      label: "face —",
+      state: "off",
+      tooltip: "facial track is off: press M to drive the face from the webcam",
+    };
+  }
+
+  switch (face.kind) {
+    case "off":
+      return {
+        key: "face",
+        label: "face off",
+        state: "off",
+        tooltip: "the tracking camera is not running: the panel says why",
+      };
+    case "unknown":
+      // The poll itself failed; the frames and the lift are unknown with it.
+      return {
+        key: "face",
+        label: "face ?",
+        state: "warn",
+        tooltip: "the status poll failed: the backend did not answer",
+      };
+    case "starting":
+      return {
+        key: "face",
+        label: "face starting",
+        state: "warn",
+        tooltip: "opening the webcam…",
+      };
+    case "info": {
+      const size = `${face.width}×${face.height}`;
+      if (face.failed) {
+        return {
+          key: "face",
+          label: `face ${size} off`,
+          state: "off",
+          tooltip: "the webcam stopped: close the app holding it, then press R to retry",
+        };
+      }
+      // The lift is a diagnostic, not a headline: it belongs where the frame
+      // count is, and only when the stage actually changed the picture.
+      const lift = lowLightGain > 1.05 ? ` · lift ×${lowLightGain.toFixed(1)}` : "";
+      return {
+        key: "face",
+        label: `face ${size} ${face.frames} fr`,
+        state: "ok",
+        tooltip: `the webcam driving the eyes: ${face.frames} frames read${lift}`,
+      };
+    }
+  }
+}
+
+function keysChip(keysGlobal: boolean): Chip {
+  return keysGlobal
+    ? {
+        key: "keys",
+        label: "keys global",
+        state: "ok",
+        tooltip: "every key on the desktop drives the face",
+      }
+    : {
+        key: "keys",
+        label: "keys window",
+        state: "warn",
+        tooltip: `keys only work while this window has focus — ${INPUT_FIX}`,
+      };
+}
+
+function originChip(gaze: { label: string; source: string }): Chip {
+  if (gaze.source === "monitor") {
+    return {
+      key: "origin",
+      label: `origin ${gaze.label}`,
+      state: "ok",
+      tooltip: "the cursor is read from the whole monitor",
+    };
+  }
+  if (gaze.source === "window") {
+    return {
+      key: "origin",
+      label: `origin ${gaze.label}`,
+      state: "warn",
+      tooltip:
+        "no desktop cursor (Hyprland only): the pointer over the stage is the aim, " +
+        "and it snaps back to the origin when it leaves",
+    };
+  }
+  return {
+    key: "origin",
+    label: `origin ${gaze.label}`,
+    state: "off",
+    tooltip: "no cursor source yet: move the pointer over the stage",
+  };
+}
+
+/** The row's chips, in paint order. Fixed count, fixed order, no DOM. */
+export function statusChips(snapshot: StatusSnapshot): Chip[] {
+  return [
+    modeChip(snapshot.tracking),
+    deviceChip(snapshot),
+    fpsChip(snapshot),
+    droppedChip(snapshot),
+    micChip(snapshot.mic),
+    faceChip(snapshot.face, snapshot.tracking, snapshot.lowLightGain),
+    keysChip(snapshot.keysGlobal),
+    originChip(snapshot.gaze),
+  ];
 }

@@ -176,7 +176,8 @@ body.folded .hud {
   padding-inline: 0;
 }
 
-body.folded #hud-text {
+body.folded #hud-text,
+body.folded #hud-chips {
   display: none;
 }
 
@@ -198,7 +199,7 @@ body.folded #hud-text {
   display: none;
 }
 
-/* The status line, at the foot of the dock. It is as wide as the column. */
+/* The status row, at the foot of the dock. It is as wide as the column. */
 .hud {
   display: flex;
   align-items: center;
@@ -219,10 +220,66 @@ body.folded #hud-text {
   transition: color 150ms ease;
 }
 
-/* The line ellipsises inside the pill instead of pushing the dot out of it. */
+/* The one-line status (a cold start, a failure headline) stays on one line. */
 #hud-text {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/*
+ * The chip row. Eight chips have to live in a 295 px foot (320 px column minus
+ * the dock's padding), so they wrap instead of ellipsising: a truncated chip
+ * would hide the one fact it exists to show. The flex basis lets a long chip
+ * (the device, with its size and format) sit on its own line rather than
+ * squeezing its neighbours.
+ */
+#hud-chips {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 4px;
+  min-width: 0;
+  white-space: normal;
+}
+
+#hud-chips[hidden] {
+  display: none;
+}
+
+/*
+ * One fact, in a pill. The colour is the state and nothing else: green = fine,
+ * yellow = look at this, grey = not there. `title` carries the source of the
+ * number or the command that fixes it, which is why the row takes the pointer
+ * back from `.hud` above.
+ */
+.chip {
+  padding: 1px 5px;
+  border: 1px solid rgb(205 214 244 / 10%);
+  border-radius: 5px;
+  background: rgb(205 214 244 / 5%);
+  color: var(--subtext0);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: help;
+}
+
+.chip[data-state="ok"] {
+  border-color: rgb(166 227 161 / 22%);
+  background: rgb(166 227 161 / 8%);
+  color: var(--green);
+}
+
+.chip[data-state="warn"] {
+  border-color: rgb(249 226 175 / 28%);
+  background: rgb(249 226 175 / 8%);
+  color: var(--yellow);
+}
+
+.chip[data-state="off"] {
+  border-color: rgb(127 132 156 / 22%);
+  color: var(--overlay1);
 }
 
 .hud .dot {
@@ -241,6 +298,11 @@ body.folded #hud-text {
 .hud[data-state="live"] .dot {
   background: var(--green);
   box-shadow: 0 0 8px rgb(166 227 161 / 60%);
+}
+
+/* The stream is fine but a chip in the row is not: the folded dock's dot shows it. */
+.hud[data-state="warn"] .dot {
+  background: var(--yellow);
 }
 
 .hud[data-state="starting"] .dot {

@@ -1,5 +1,6 @@
 import { classify, inputDenied, type AppError, type ErrorCode, type ErrorSource } from "./errors";
 import type { CalibrationKind } from "./face/calibration";
+import type { Chip } from "./hud";
 import { layoutFor, type Layout, type LayoutState } from "./layout";
 import { LookOverlay } from "./look_overlay";
 import type { FaceMode } from "./mode";
@@ -13,8 +14,8 @@ import type { FaceMode } from "./mode";
  * repaint here can never start work.
  */
 
-/** What the HUD line is saying; sets its colour. */
-export type HudState = "starting" | "live" | "idle" | "error" | "preview";
+/** What the HUD line is saying; sets its colour. `warn` is a chip row with a warning in it. */
+export type HudState = "starting" | "live" | "warn" | "idle" | "error" | "preview";
 
 /** What the preview says while the camera is not running. */
 export const CAMERA_OFF_MESSAGE = "camera off · manual mode";
@@ -41,6 +42,9 @@ export const debugCanvas = document.querySelector<HTMLCanvasElement>("#debug-cam
 
 const hud = q<HTMLElement>("#hud");
 const hudText = q<HTMLElement>("#hud-text");
+const hudChips = q<HTMLElement>("#hud-chips");
+/** One node per chip key, reused so the once-a-second repaint never reflows. */
+const chipNodes = new Map<string, HTMLElement>();
 const errorPanel = q<HTMLElement>("#error-panel");
 const errorTitle = q<HTMLElement>("#error-title");
 const errorText = q<HTMLElement>("#error-text");
@@ -108,10 +112,61 @@ export function relayout(): void {
   paintLayout();
 }
 
-/** The status line under the canvas. */
+/**
+ * The status row: one chip per fact, keyed by `chip.key`.
+ *
+ * The poll repaints this once a second, so the nodes are reused rather than
+ * rebuilt — a fresh element every second would drop the tooltip a person is
+ * reading and make the row twitch. The container's own state is the worst
+ * chip's, so a warning turns the folded dock's dot yellow, and the row takes
+ * the slot over from any one-line message because the two are the same strip.
+ */
+export function setHudChips(chips: readonly Chip[]): void {
+  hudChips.hidden = false;
+  hudText.hidden = true;
+
+  let state: HudState = "live";
+  const seen = new Set<string>();
+  for (const chip of chips) {
+    seen.add(chip.key);
+    if (chip.state === "warn") state = "warn";
+    let node = chipNodes.get(chip.key);
+    if (node === undefined) {
+      node = document.createElement("span");
+      node.className = "chip";
+      chipNodes.set(chip.key, node);
+      hudChips.append(node);
+    }
+    // Only write what changed: text and title assignment both cost a layout or
+    // a style recalc, and the poll runs while the face is being rendered.
+    if (node.textContent !== chip.label) node.textContent = chip.label;
+    if (node.dataset.state !== chip.state) node.dataset.state = chip.state;
+    if (node.title !== chip.tooltip) node.title = chip.tooltip;
+  }
+  for (const [key, node] of chipNodes) {
+    if (!seen.has(key)) {
+      node.remove();
+      chipNodes.delete(key);
+    }
+  }
+  hud.dataset.state = state;
+}
+
+/**
+ * A one-line status, for the states that have no numbers yet: a cold start, a
+ * stopped camera, a backend that is not answering, the browser preview.
+ *
+ * It replaces the chip row in the same slot, so a failure headline is never
+ * read beside a row that still claims the stream is fine.
+ */
 export function setHud(state: HudState, text: string): void {
   hud.dataset.state = state;
-  hudText.textContent = text;
+  hudChips.hidden = true;
+  hudText.hidden = false;
+  if (hudText.textContent !== text) hudText.textContent = text;
+  // The line ellipsises in the 295 px foot, so a long failure headline is only
+  // readable whole on hover — or in the error panel, which says the same thing.
+  if (hudText.title !== text) hudText.title = text;
 }
 
 /** Which input drives the face: the mode name and the highlighted rows. */

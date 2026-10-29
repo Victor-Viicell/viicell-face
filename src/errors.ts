@@ -57,6 +57,15 @@ interface Rule {
   fix?: string;
 }
 
+/**
+ * The one command that has ever brought a dead PipeWire microphone back.
+ *
+ * Exported because the status row's mic chip shows the fix on hover without
+ * going through `classify()` — the row has a state, not a failure, and must not
+ * invent a second copy of the command.
+ */
+export const MIC_FIX = "systemctl --user restart wireplumber";
+
 const SETUP_CAMERA = "sudo scripts/setup-virtual-camera.sh";
 const FIND_HOLDER = "sudo fuser -v /dev/video*";
 const SETUP_INPUT = "sudo scripts/setup-input-access.sh";
@@ -111,7 +120,7 @@ const RULES: readonly Rule[] = [
     test: /microphone/i,
     code: "mic_denied",
     message: "the microphone would not open",
-    fix: "systemctl --user restart wireplumber",
+    fix: MIC_FIX,
   },
   {
     // Ordering inside this pair is the whole reason `source` exists.

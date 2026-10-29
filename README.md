@@ -44,9 +44,9 @@ both.
 | `src/face/crop.ts` | The preview's face framing: padding, aspect and easing (unit tested) |
 | `src/input.ts` | One control stream from the devices or the focused window |
 | `src/errors.ts` | Device failures → one `AppError` (code, headline, raw detail, fix command), pure and unit tested |
-| `src/hud.ts` | The status line as a pure string builder over one snapshot (unit tested) |
+| `src/hud.ts` | The status row as a pure chip builder over one snapshot: label, state and tooltip per chip (unit tested) |
 | `src/layout.ts` | The window as arithmetic: docked column width, the letterboxed 16:9 canvas at a whole-number scale, the face safe area (unit tested) |
-| `src/shell.ts` | The only module that touches element ids: the dock (fold, layout paint), HUD, error panel, hints, calibration panel, look overlay |
+| `src/shell.ts` | The only module that touches element ids: the dock (fold, layout paint), the status row, error panel, hints, calibration panel, look overlay |
 | `src/stream.ts` | The frame pump and the once-a-second health poll against the Rust backend |
 | `src/controls.ts` | Keys and wheel: posing the face by hand, and picking the gaze origin |
 | `src/track_view.ts` | Camera mode: tracking camera, the full-monitor crosshair, the calibration flow |
@@ -63,7 +63,7 @@ both.
 Frames are pushed with `invoke("push_frame", uint8Array)`, which makes Tauri send
 a raw octet-stream body instead of JSON. The Rust side copies each frame into a
 one-slot channel, so a slow device can never stall the webview; extra frames are
-dropped and reported in the HUD.
+dropped and reported in the status row.
 
 ## The face rig
 
@@ -267,8 +267,8 @@ origin you pick is saved and comes back on the next start (see
 
 In `mode track` the origin works on the tracked gaze instead: the face still
 looks where you look, but it is drawn as if it stood at the chosen corner, so
-the middle of the screen is below and to the side of it. The HUD names the origin
-in both modes (`eyes camera·top left`).
+the middle of the screen is below and to the side of it. The `origin` chip names
+the anchor in both modes (`origin top left`).
 
 Each pupil slides as far as its own shell allows, and past it: 40% further left
 and right, 5× further up and down, because the disc already fills most of the
@@ -292,8 +292,9 @@ keeps a shut eye off the lid that is pinned to its rest outline.
 On Hyprland the cursor is read from the compositor's IPC socket
 (`src-tauri/src/pointer.rs`), normalised into the monitor it is on, and pushed to
 the webview. Outside Hyprland (or in a plain browser) the pointer over the canvas
-is used instead; the HUD says which source is live: `eyes cursor·monitor` or
-`eyes cursor·window`.
+is used instead, and the `origin` chip says which is live: green when the cursor
+comes from the whole monitor, yellow when only the pointer over the stage is the
+aim (hovering it says so).
 
 ## Facial tracking
 
@@ -512,14 +513,14 @@ training exposure, and landmarks get shakier with it. Brightness is measured on 
 small thumbnail and each region is scaled towards a common exposure, up to 3×:
 that lifts the shadow side of a face beside a small light without blowing out
 the lit side, which a global brightness change cannot do. A frame that is
-already well lit is passed through untouched, and the HUD says `lift ×N` when
-the stage did something. The lift only amplifies light the sensor caught — it
-cannot invent it, so in real darkness a light on the face (or an IR camera) is
-still the thing that decides whether tracking works.
+already well lit is passed through untouched, and the `face` chip's tooltip says
+`lift ×N` when the stage did something. The lift only amplifies light the sensor
+caught — it cannot invent it, so in real darkness a light on the face (or an IR
+camera) is still the thing that decides whether tracking works.
 
 **The webcam is exclusive.** While another app holds the camera — OBS with a
-video-capture source, for instance — the app says so under the HUD and leaves
-the face alone. Free the camera and tap `R`. Hiding the window keeps the camera
+video-capture source, for instance — the app says so in the failure panel, the
+`face` chip goes grey, and the face is left alone. Free the camera and tap `R`. Hiding the window keeps the camera
 open on purpose, so the face keeps moving while the window is in the tray;
 switch back to `mode manual` to release it.
 
@@ -544,9 +545,9 @@ sudo scripts/setup-input-access.sh
 It installs a udev `uaccess` rule, so only the user with the active desktop
 session can read those devices. Undo it with
 `sudo rm /etc/udev/rules.d/70-viicell-face-input.rules && sudo udevadm control --reload-rules`.
-The app picks the devices up on its own; the HUD switches from `keys window` to
-`keys global`. Without the rule everything still works while the window has
-focus, and a line above the HUD says
+The app picks the devices up on its own; the `keys` chip switches from
+`keys window` to `keys global`. Without the rule everything still works while the
+window has focus, and a line above the status row says
 `global keys off — run sudo scripts/setup-input-access.sh` so the missing grant
 is not mistaken for a bug in the controls.
 
@@ -576,7 +577,7 @@ lighting the display.
 Audio is captured in Rust (`cpal`) rather than with `getUserMedia`: WebKitGTK
 needs a full GStreamer install to capture media, and the native path also keeps
 working while the window is hidden. Without a microphone the synth line simply
-draws its resting bars and the HUD says `mic off`.
+draws its resting bars and the `mic` chip says `mic off`.
 
 ## Requirements
 
@@ -631,15 +632,17 @@ bun test              # tracking maths
 The `cargo test` run includes two ignored tests that need real hardware:
 `captures_a_frame` opens the webcam (run it with `--ignored`).
 
-The HUD at the foot of the panel shows the device, format, measured output rate
-and the microphone state.
+The strip at the foot of the dock reports the device, the measured output rate,
+the dropped frames and every input device as a row of chips; each chip's tooltip
+names where its number comes from, or the command that fixes it (see
+[The window](#the-window)).
 
 ## The window
 
 The window is two columns: the **stage**, where the face is the only thing on
 screen, and a **dock** on the right holding everything that is not the face —
-the camera preview, the calibration presets, the key map, and the status line
-with its fix hints at the bottom.
+the camera preview, the calibration presets, the key map, and the status row of
+chips with their fix hints at the bottom.
 
 The stage letterboxes the canvas to 16:9 at a whole-number scale (16 × *k* by
 9 × *k* pixels), centred, so the face is never stretched, never lands on a half
@@ -652,6 +655,37 @@ The arithmetic lives in `src/layout.ts` and is unit-tested at 640×360,
 1280×720 and 1920×1080; `src/shell.ts` writes the result into the CSS custom
 properties `src/styles.css` reads, and repaints on every resize. At a very short
 window the dock's body scrolls rather than letting a control fall off it.
+
+### The status row
+
+One chip per fact, in this order, repainted once a second from the status poll
+the app has always had (`src/stream.ts` → `statusChips()` → `shell.setHudChips`).
+Green is fine, yellow wants a look, grey means that thing is not there.
+
+| Chip | Says | Where the number comes from |
+| --- | --- | --- |
+| `manual` / `track` | which input poses the face | `faceMode()`, the mode `M` toggles |
+| `Upright Camera 1280×720 YUYV` | the loopback device, its size and pixel format | `camera_status.info` (`label`, `width`/`height`, `pixelFormat`); the path is in the tooltip |
+| `30 fps` | the rate actually written, over the last second | `camera_status.fps`, the Rust writer's own count |
+| `3 dropped` | frames skipped because a push outran the frame | `framesDropped` of `framesReceived` |
+| `mic live` / `mic waiting` / `mic off` | whether the mouth hears the room | the mouth's state, fed by the `microphone` events |
+| `face 640×480 700 fr` | the tracking camera, its size and frames read | `face_camera_status`; only meaningful in `mode track` |
+| `keys global` / `keys window` | whether the udev rule let the backend read the keyboard | `keysAreGlobal()`, i.e. did `/dev/input` open |
+| `origin center` | where the eyes look from, and whether a real cursor is readable | the gaze's anchor plus its live source (monitor, window, none) |
+
+Every chip carries a `title`: the source of its number, or the one command that
+changes its state — the same strings `src/errors.ts` hands the failure panel, so
+the two cannot drift. The row keeps its eight chips in that order whatever the
+state (a mode with nothing to track says `face —` rather than dropping the chip),
+and the painter reuses one element per chip, so a once-a-second repaint never
+reflows the strip or closes a tooltip someone is reading. Eight chips do not fit
+295 px on one line: they wrap, which is why a short window makes the strip two or
+three lines tall instead of ellipsising a fact away. The container's state is the
+worst chip's, so in a folded dock — where only the dot is left — yellow still
+means one of them wants attention. The one-line message owns the strip when
+there are no measured numbers yet: a cold start, a stopped camera, the browser
+preview, and the failure headline the panel is showing (that line ellipsises, so
+its tooltip has the whole sentence).
 
 ### When a device fails
 
@@ -679,7 +713,7 @@ failure that comes back is reported again instead of being silenced forever.
 
 Keys are the one exception: when the app was never granted read access to
 `/dev/input`, the face still works and only the global keys do not, so that case
-is a one-line hint under the status line in the panel, with the same copyable fix
+is a one-line hint under the status row in the panel, with the same copyable fix
 (`sudo scripts/setup-input-access.sh`), never a panel over the canvas.
 
 ## Window behaviour

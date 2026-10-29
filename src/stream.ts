@@ -6,7 +6,7 @@ import { BACKGROUND } from "./config";
 import { classify, type AppError } from "./errors";
 import type { CalibrationKind } from "./face/calibration";
 import { faceCameraStatus } from "./face_camera";
-import { statusLine, type FaceNote, type MicNote } from "./hud";
+import { statusChips, type FaceNote, type MicNote } from "./hud";
 import { keysAreGlobal } from "./input";
 import { faceMode } from "./mode";
 import type { SettingsStore } from "./settings";
@@ -107,6 +107,9 @@ export async function connect(): Promise<void> {
   try {
     const info = await startCamera(output.width, output.height, output.fps);
     streaming = true;
+    // The claim, not the measurement: `startCamera` echoes what the device was
+    // asked for. The first status poll (≤ 1 s) replaces this line with the chip
+    // row, which is the measured rate, the real drops and the devices.
     shell.setHud(
       "live",
       `${info.device.label} · ${info.device.path} · ${info.width}×${info.height} ${info.pixelFormat} · ${info.fps} fps`,
@@ -228,9 +231,8 @@ export async function refreshStatus(): Promise<void> {
       sources.calibrated,
     );
 
-    shell.setHud(
-      "live",
-      statusLine({
+    shell.setHudChips(
+      statusChips({
         tracking: trackingMode,
         device: { label: device.label, path: device.path },
         width,

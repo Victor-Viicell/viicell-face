@@ -54,6 +54,7 @@ describe("mergeSettings", () => {
       accent: "#a6e3a1",
       startMode: "track",
       window: { width: 900, height: 600, x: 40, y: -20 },
+      panel: { width: 380, collapsed: true },
     };
     expect(mergeSettings(saved)).toEqual(saved);
   });
@@ -68,6 +69,20 @@ describe("mergeSettings", () => {
     expect(merged.accent).toBe("#f9e2af");
     expect("fromTheFuture" in merged).toBe(false);
     expect("pixelFormat" in merged.output).toBe(false);
+  });
+
+  test("clamps the dock width and keeps the folded flag", () => {
+    // The bounds are the same ones `layout.ts` lays out with: a file from a
+    // wider build comes back as a column a control still fits in.
+    expect(mergeSettings({ panel: { width: 9000, collapsed: true } }).panel).toEqual({
+      width: 420,
+      collapsed: true,
+    });
+    expect(mergeSettings({ panel: { width: 40 } }).panel).toEqual({ width: 240, collapsed: false });
+    expect(mergeSettings({ panel: { width: 310, collapsed: "yes" } }).panel).toEqual({
+      width: 310,
+      collapsed: false,
+    });
   });
 
   test("merges an older version forward without losing values", () => {
@@ -180,6 +195,20 @@ describe("SettingsStore", () => {
     expect(restored.gazeOrigin).toBe("bottomRight");
     expect(restored.startMode).toBe("track");
     expect(restored.window).toEqual({ width: 1024, height: 700, x: -12, y: 34 });
+  });
+
+  test("a folded dock stays folded, and a partial patch keeps the width", async () => {
+    const adapter = memoryAdapter();
+    const first = store(adapter);
+    await first.load();
+    first.set({ panel: { width: 380 } });
+    // The fold is one flag; it must not reset the width it was last left at.
+    first.set({ panel: { collapsed: true } });
+    await first.flush();
+    expect(first.current.panel).toEqual({ width: 380, collapsed: true });
+
+    const second = store(adapter);
+    expect((await second.load()).panel).toEqual({ width: 380, collapsed: true });
   });
 
   test("an old file keeps its values and gains the new fields", async () => {

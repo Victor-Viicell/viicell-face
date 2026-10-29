@@ -37,6 +37,12 @@ export interface WindowSettings {
   y: number | null;
 }
 
+/** The docked panel: how wide it was left, and whether it is folded away. */
+export interface PanelSettings {
+  width: number;
+  collapsed: boolean;
+}
+
 /** Everything the app remembers. */
 export interface Settings {
   version: number;
@@ -50,6 +56,7 @@ export interface Settings {
   accent: string;
   startMode: FaceMode;
   window: WindowSettings;
+  panel: PanelSettings;
 }
 
 /**
@@ -75,6 +82,9 @@ export interface SettingsAdapter {
 export const LIMITS = {
   output: { minWidth: 160, maxWidth: 1920, minHeight: 90, maxHeight: 1080, minFps: 1, maxFps: 120 },
   window: { minWidth: 320, maxWidth: 7680, minHeight: 240, maxHeight: 4320 },
+  // The docked column: the same bounds `layout.ts` enforces, so a file written
+  // by a wider build still lays out to something a control fits in.
+  panel: { minWidth: 240, maxWidth: 420 },
 } as const;
 
 /** The values a fresh install boots with — also the shape every load merges onto. */
@@ -87,6 +97,7 @@ export const DEFAULT_SETTINGS: Settings = {
   accent: "#89b4fa",
   startMode: "manual",
   window: { width: 1280, height: 800, x: null, y: null },
+  panel: { width: 320, collapsed: false },
 };
 
 const HEX_COLOUR = /^#[0-9a-f]{6}$/i;
@@ -144,6 +155,7 @@ export function mergeSettings(raw: unknown, base: Settings = DEFAULT_SETTINGS): 
   const source = isRecord(raw) ? raw : {};
   const output = isRecord(source.output) ? source.output : {};
   const window = isRecord(source.window) ? source.window : {};
+  const panel = isRecord(source.panel) ? source.panel : {};
 
   return {
     version: SETTINGS_VERSION,
@@ -178,6 +190,10 @@ export function mergeSettings(raw: unknown, base: Settings = DEFAULT_SETTINGS): 
       x: coordinate(window.x, base.window.x),
       y: coordinate(window.y, base.window.y),
     },
+    panel: {
+      width: integer(panel.width, LIMITS.panel.minWidth, LIMITS.panel.maxWidth, base.panel.width),
+      collapsed: typeof panel.collapsed === "boolean" ? panel.collapsed : base.panel.collapsed,
+    },
   };
 }
 
@@ -200,10 +216,11 @@ export function serializeSettings(settings: Settings): string {
   return `${JSON.stringify(settings, null, 2)}\n`;
 }
 
-/** A patch: top-level fields, with the two objects allowed to arrive partially. */
-export type SettingsPatch = Partial<Omit<Settings, "output" | "window">> & {
+/** A patch: top-level fields, with the three objects allowed to arrive partially. */
+export type SettingsPatch = Partial<Omit<Settings, "output" | "window" | "panel">> & {
   output?: Partial<OutputSettings>;
   window?: Partial<WindowSettings>;
+  panel?: Partial<PanelSettings>;
 };
 
 export interface SettingsOptions {
@@ -285,6 +302,7 @@ export class SettingsStore {
       ...patch,
       output: { ...this.#settings.output, ...(patch.output ?? {}) },
       window: { ...this.#settings.window, ...(patch.window ?? {}) },
+      panel: { ...this.#settings.panel, ...(patch.panel ?? {}) },
     };
     const next = mergeSettings(merged, this.#base);
 

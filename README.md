@@ -45,7 +45,8 @@ both.
 | `src/input.ts` | One control stream from the devices or the focused window |
 | `src/errors.ts` | Device failures → one `AppError` (code, headline, raw detail, fix command), pure and unit tested |
 | `src/hud.ts` | The status line as a pure string builder over one snapshot (unit tested) |
-| `src/shell.ts` | The only module that touches element ids: HUD, error panel, hints, calibration panel, look overlay |
+| `src/layout.ts` | The window as arithmetic: docked column width, the letterboxed 16:9 canvas at a whole-number scale, the face safe area (unit tested) |
+| `src/shell.ts` | The only module that touches element ids: the dock (fold, layout paint), HUD, error panel, hints, calibration panel, look overlay |
 | `src/stream.ts` | The frame pump and the once-a-second health poll against the Rust backend |
 | `src/controls.ts` | Keys and wheel: posing the face by hand, and picking the gaze origin |
 | `src/track_view.ts` | Camera mode: tracking camera, the full-monitor crosshair, the calibration flow |
@@ -435,7 +436,7 @@ calibrating the mouth leaves the eyes and gaze as they were.
 In the corner steps the monitor corner is the reference: a green ring marks it,
 so look at the ring and hold while the pose is collected. The window is
 fullscreen for the run, which is what makes a position in the window a position
-on the monitor; the side panels step out of the way so they cannot cover a
+on the monitor; the whole dock hides so it cannot cover a
 ring. Each held pose is paired with that corner, so a single run gives the fit
 four points (the neutral is the zero). Four corners also measure the open-eye
 blink reading in every direction, which is what stops looking around from
@@ -630,8 +631,27 @@ bun test              # tracking maths
 The `cargo test` run includes two ignored tests that need real hardware:
 `captures_a_frame` opens the webcam (run it with `--ignored`).
 
-The HUD in the bottom-left corner shows the device, format, measured output rate
+The HUD at the foot of the panel shows the device, format, measured output rate
 and the microphone state.
+
+## The window
+
+The window is two columns: the **stage**, where the face is the only thing on
+screen, and a **dock** on the right holding everything that is not the face —
+the camera preview, the calibration presets, the key map, and the status line
+with its fix hints at the bottom.
+
+The stage letterboxes the canvas to 16:9 at a whole-number scale (16 × *k* by
+9 × *k* pixels), centred, so the face is never stretched, never lands on a half
+pixel, and never has a control over it. The dock is 320 px wide by default; its
+fold button turns it into a 44 px strip and hands the space back to the face,
+and the folded flag and the width are remembered in `settings.json` like every
+other setting.
+
+The arithmetic lives in `src/layout.ts` and is unit-tested at 640×360,
+1280×720 and 1920×1080; `src/shell.ts` writes the result into the CSS custom
+properties `src/styles.css` reads, and repaints on every resize. At a very short
+window the dock's body scrolls rather than letting a control fall off it.
 
 ### When a device fails
 
@@ -659,7 +679,7 @@ failure that comes back is reported again instead of being silenced forever.
 
 Keys are the one exception: when the app was never granted read access to
 `/dev/input`, the face still works and only the global keys do not, so that case
-is a one-line hint above the HUD with the same copyable fix
+is a one-line hint under the status line in the panel, with the same copyable fix
 (`sudo scripts/setup-input-access.sh`), never a panel over the canvas.
 
 ## Window behaviour
@@ -709,10 +729,11 @@ and the v4l2 format are all started from the numbers it holds.
 
 The same file also carries the pieces the app has no panel for yet: the loopback
 device path, the webcam path, the gaze origin (saved when you pick it with the
-number keys), the pupil accent, the start mode and the window size/position. They
-are validated the same way and written debounced, so a burst of changes is a
-single write. Only the gaze origin is wired up so far — the rest are groundwork
-for the settings panel.
+number keys), the pupil accent, the start mode, the window size/position, and
+the dock's width and folded flag (saved when you fold it). They are validated
+the same way and written debounced, so a burst of changes is a single write.
+Only the gaze origin and the dock's fold flag are wired up so far — the rest are
+groundwork for the settings panel.
 
 The artwork lives in `src/face/art.ts` (paths and fills) and
 `src/face/skeleton.ts` (pivots/parents). Re-exporting `viicell-faces.svg` means

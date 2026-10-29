@@ -73,6 +73,9 @@ async function boot(): Promise<void> {
   const saved = await settings.load();
   const output = saved.output;
   gaze.setOrigin(saved.gazeOrigin);
+  // The docked column and the letterboxed canvas, before anything measures the
+  // window. `layout.ts` does the maths; the store remembers the width.
+  shell.installLayout(() => settings.value("panel"));
 
   const app = new Application();
   await app.init({
@@ -170,6 +173,9 @@ async function boot(): Promise<void> {
   });
 
   if (!isTauri) {
+    // Still wire the dock: folding is a layout setting, not a backend one, and
+    // the browser preview is where the layout gets eyeballed.
+    wireButtons();
     shell.setCalibrateAvailable(false);
     shell.setHud("preview", "browser preview — the camera bridge needs the Tauri window");
     return;
@@ -205,12 +211,17 @@ async function boot(): Promise<void> {
   }
 }
 
-/** The panel's own buttons: retry, copy a fix, dismiss, and the calibrations. */
+/** The panel's own buttons: retry, copy a fix, dismiss, the calibrations, the fold. */
 function wireButtons(): void {
   shell.retryButton.addEventListener("click", () => void connect());
   shell.errorCopy.addEventListener("click", () => void shell.copyErrorFix());
   shell.errorDismiss.addEventListener("click", () => shell.dismissProblem());
   shell.inputHintCopy.addEventListener("click", () => void shell.copyInputFix());
+  // Folding is one stored flag; the paint follows the store, not the click.
+  shell.panelToggle.addEventListener("click", () => {
+    settings.set({ panel: { collapsed: !settings.value("panel").collapsed } });
+    shell.relayout();
+  });
   for (const button of shell.calibrateButtons) {
     button.addEventListener("click", () =>
       trackView?.startCalibration(button.dataset.calibration as CalibrationKind),

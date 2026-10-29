@@ -1,5 +1,6 @@
 import { classify, inputDenied, type AppError, type ErrorCode, type ErrorSource } from "./errors";
 import type { CalibrationKind } from "./face/calibration";
+import { layoutFor, type Layout, type LayoutState } from "./layout";
 import { LookOverlay } from "./look_overlay";
 import type { FaceMode } from "./mode";
 
@@ -31,6 +32,10 @@ export const inputHintCopy = q<HTMLButtonElement>("#input-hint-copy");
 export const calibrationNext = q<HTMLButtonElement>("#calibration-next");
 export const calibrationCancel = q<HTMLButtonElement>("#calibration-cancel");
 export const calibrateButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-calibration]")];
+/** The fold toggle of the docked column; `main.ts` wires its click. */
+export const panelToggle = q<HTMLButtonElement>("#panel-toggle");
+/** The scrolling half of the dock; the camera preview docks here between runs. */
+const panelBody = q<HTMLElement>("#panel-body");
 /** The camera preview canvas; it moves into the calibration panel and back. */
 export const debugCanvas = document.querySelector<HTMLCanvasElement>("#debug-camera");
 
@@ -67,6 +72,41 @@ export const lookOverlay = new LookOverlay(
 );
 
 const rows = { lean: leanRow, debug: debugRow, look: lookRow } as const;
+
+/**
+ * The docked layout, painted from the maths.
+ *
+ * `layout.ts` decides where the canvas and the column are; this writes the
+ * result into the custom properties `styles.css` reads, and repaints on every
+ * resize. The state is read through a callback so the remembered width and the
+ * folded flag stay in the settings store — there is no second copy here.
+ */
+let paintLayout: () => void = () => {};
+
+export function installLayout(state: () => LayoutState): void {
+  const root = document.documentElement;
+  paintLayout = (): void => {
+    const current = state();
+    const layout: Layout = layoutFor(
+      { width: window.innerWidth, height: window.innerHeight },
+      current,
+    );
+    root.style.setProperty("--panel-width", `${layout.panel.width}px`);
+    root.style.setProperty("--view-x", `${layout.view.x}px`);
+    root.style.setProperty("--view-y", `${layout.view.y}px`);
+    root.style.setProperty("--view-w", `${layout.view.width}px`);
+    root.style.setProperty("--view-h", `${layout.view.height}px`);
+    document.body.classList.toggle("folded", current.collapsed);
+    panelToggle.setAttribute("aria-expanded", current.collapsed ? "false" : "true");
+  };
+  window.addEventListener("resize", () => paintLayout());
+  paintLayout();
+}
+
+/** Repaints the layout after the store changed under it (fold, width). */
+export function relayout(): void {
+  paintLayout();
+}
 
 /** The status line under the canvas. */
 export function setHud(state: HudState, text: string): void {
@@ -133,12 +173,12 @@ export function openCalibrationPanel(): void {
   }
 }
 
-/** Puts the preset buttons back and returns the preview to the page. */
+/** Puts the preset buttons back and returns the preview to the dock. */
 export function closeCalibrationPanel(): void {
   calibrationPanel.hidden = true;
   calibrateGroup.hidden = false;
   if (debugCanvas) {
-    document.body.append(debugCanvas);
+    panelBody.prepend(debugCanvas);
   }
 }
 

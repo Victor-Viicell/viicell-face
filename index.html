@@ -9,13 +9,148 @@
   </head>
 
   <body data-mode="manual">
+    <!-- The stage is the whole window minus the docked panel: the face is the
+         only thing on it. `src/layout.ts` owns the numbers, `styles.css` reads
+         them back as custom properties. -->
     <main id="stage">
       <canvas id="output" width="1280" height="720"></canvas>
     </main>
 
-    <!-- The tracking camera the landmarker reads; a DOM canvas, so it can never
-         end up in the frames that are read back for the virtual camera. -->
-    <canvas id="debug-camera" class="debug-camera" aria-hidden="true" hidden></canvas>
+    <!-- One docked column on the right: the preview, the calibration presets,
+         the key map, and the status line at the bottom. Folding it hides the
+         body and leaves the toggle; nothing here ever floats over the face. -->
+    <aside id="panel" class="dock" aria-label="Controls and status">
+      <header class="dock-head">
+        <button
+          id="panel-toggle"
+          class="dock-toggle"
+          type="button"
+          aria-expanded="true"
+          aria-controls="panel-body"
+          title="Fold the panel away"
+        >
+          <span class="dock-glyph" aria-hidden="true">›</span>
+          <span class="dock-label">Hide</span>
+        </button>
+        <h1 class="dock-title">viicell-face</h1>
+      </header>
+
+      <div id="panel-body" class="dock-body">
+        <!-- The tracking camera the landmarker reads; a DOM canvas, so it can
+             never end up in the frames that are read back for the virtual
+             camera. It moves into the calibration panel and back. -->
+        <canvas id="debug-camera" class="debug-camera" aria-hidden="true" hidden></canvas>
+
+        <div id="calibrate" class="calibrate-group">
+          <button
+            class="calibrate-button"
+            type="button"
+            data-calibration="mouth"
+            title="Smile, frown and a wide-open mouth"
+          >
+            Mouth
+          </button>
+          <button
+            class="calibrate-button"
+            type="button"
+            data-calibration="eyes"
+            title="Each eye held shut, one at a time"
+          >
+            Eyes
+          </button>
+          <button
+            class="calibrate-button"
+            type="button"
+            data-calibration="pupils"
+            title="Look at each corner of the monitor in turn"
+          >
+            Pupils
+          </button>
+        </div>
+
+        <aside id="guide" class="guide" aria-label="Keyboard shortcuts">
+          <h2>Keys</h2>
+          <div class="row" id="mode-row">
+            <span class="keys">tap <kbd>M</kbd></span>
+            <span class="what">mode: <b id="mode-name">manual</b></span>
+          </div>
+          <div class="row">
+            <span class="keys"><kbd>Z</kbd><kbd>X</kbd><kbd>C</kbd></span>
+            <span class="what">brows · cheeks · eyes</span>
+          </div>
+          <div class="row">
+            <span class="keys">tap <kbd>Z</kbd><kbd>X</kbd><kbd>C</kbd></span>
+            <span class="what">blink</span>
+          </div>
+          <div class="row">
+            <span class="keys"><kbd>V</kbd><kbd>B</kbd></span>
+            <span class="what">iris · pupils</span>
+          </div>
+          <div class="row">
+            <span class="keys">tap <kbd>V</kbd><kbd>B</kbd></span>
+            <span class="what">back to drawn size</span>
+          </div>
+          <div class="row">
+            <span class="keys"><kbd>N</kbd><kbd>J</kbd><kbd>L</kbd><kbd>H</kbd></span>
+            <span class="what">mouth: width · open · lip · corners</span>
+          </div>
+          <div class="row">
+            <span class="keys">tap <kbd>N</kbd><kbd>J</kbd><kbd>L</kbd><kbd>H</kbd></span>
+            <span class="what">back to rest mouth</span>
+          </div>
+          <div class="row">
+            <span class="keys"><kbd>0</kbd> + <kbd>1</kbd>–<kbd>5</kbd></span>
+            <span class="what">track from a corner</span>
+          </div>
+          <div class="row">
+            <span class="keys">tap <kbd>0</kbd></span>
+            <span class="what">back to centre</span>
+          </div>
+          <div class="row" id="lean-row">
+            <span class="keys">hold <kbd>space</kbd></span>
+            <span class="what">lean · gaze holds</span>
+          </div>
+          <div class="row">
+            <span class="keys">tap <kbd>R</kbd></span>
+            <span class="what">recalibrate mouth · retry camera</span>
+          </div>
+          <div class="row">
+            <span class="keys"><kbd>D</kbd></span>
+            <span class="what">skeleton overlay</span>
+          </div>
+          <div class="row" id="debug-row">
+            <span class="keys">tap <kbd>T</kbd></span>
+            <span class="what">camera + landmarks</span>
+          </div>
+          <div class="row" id="look-row">
+            <span class="keys">tap <kbd>G</kbd></span>
+            <span class="what">gaze crosshair (fullscreen)</span>
+          </div>
+          <p class="note">hold a mouse side button for every key</p>
+          <p class="note">scroll up opens, grows · down closes</p>
+          <p class="note">iris and pupils stay on <kbd>V</kbd><kbd>B</kbd> in both modes</p>
+        </aside>
+      </div>
+
+      <!-- The status line and its fixes live at the foot of the same column, so
+           they can never cover the face. -->
+      <div class="dock-foot">
+        <div id="hud" class="hud" data-state="starting">
+          <span class="dot"></span>
+          <span id="hud-text">starting…</span>
+        </div>
+
+        <!-- The classified `input_denied` hint: the keys work, but only while
+             this window has focus, and the fix is one command to copy. -->
+        <div id="input-hint" class="input-hint" hidden>
+          <span id="input-hint-text"></span>
+          <code id="input-hint-fix"></code>
+          <button id="input-hint-copy" type="button">Copy</button>
+        </div>
+
+        <div id="track-hint" class="input-hint track-hint" hidden></div>
+      </div>
+    </aside>
 
     <!-- The full-monitor look overlay: a crosshair where the tracker says the
          eyes look, and the mark a calibration step asks for. DOM, so it can
@@ -25,48 +160,8 @@
       <div id="look-crosshair" class="look-crosshair" hidden><span></span></div>
     </div>
 
-    <div id="hud" class="hud" data-state="starting">
-      <span class="dot"></span>
-      <span id="hud-text">starting…</span>
-    </div>
-
-    <!-- The classified `input_denied` hint: the keys work, but only while this
-         window has focus, and the fix is one command to copy. -->
-    <div id="input-hint" class="input-hint" hidden>
-      <span id="input-hint-text"></span>
-      <code id="input-hint-fix"></code>
-      <button id="input-hint-copy" type="button">Copy</button>
-    </div>
-
-    <div id="track-hint" class="input-hint track-hint" hidden></div>
-
-    <div id="calibrate" class="calibrate-group">
-      <button
-        class="calibrate-button"
-        type="button"
-        data-calibration="mouth"
-        title="Smile, frown and a wide-open mouth"
-      >
-        Mouth
-      </button>
-      <button
-        class="calibrate-button"
-        type="button"
-        data-calibration="eyes"
-        title="Each eye held shut, one at a time"
-      >
-        Eyes
-      </button>
-      <button
-        class="calibrate-button"
-        type="button"
-        data-calibration="pupils"
-        title="Look at each corner of the monitor in turn"
-      >
-        Pupils
-      </button>
-    </div>
-
+    <!-- The calibration run is a dialog over the stage: it is the one thing
+         that is allowed to cover the face, and only while a step runs. -->
     <div id="calibration" class="calibration" hidden>
       <p class="calibration-title">
         <span id="calibration-kind">Face</span> calibration <span id="calibration-count"></span>
@@ -80,69 +175,6 @@
         <button id="calibration-next" type="button">Next</button>
       </div>
     </div>
-
-    <aside id="guide" class="guide" aria-label="Keyboard shortcuts">
-      <h2>Keys</h2>
-      <div class="row" id="mode-row">
-        <span class="keys">tap <kbd>M</kbd></span>
-        <span class="what">mode: <b id="mode-name">manual</b></span>
-      </div>
-      <div class="row">
-        <span class="keys"><kbd>Z</kbd><kbd>X</kbd><kbd>C</kbd></span>
-        <span class="what">brows · cheeks · eyes</span>
-      </div>
-      <div class="row">
-        <span class="keys">tap <kbd>Z</kbd><kbd>X</kbd><kbd>C</kbd></span>
-        <span class="what">blink</span>
-      </div>
-      <div class="row">
-        <span class="keys"><kbd>V</kbd><kbd>B</kbd></span>
-        <span class="what">iris · pupils</span>
-      </div>
-      <div class="row">
-        <span class="keys">tap <kbd>V</kbd><kbd>B</kbd></span>
-        <span class="what">back to drawn size</span>
-      </div>
-      <div class="row">
-        <span class="keys"><kbd>N</kbd><kbd>J</kbd><kbd>L</kbd><kbd>H</kbd></span>
-        <span class="what">mouth: width · open · lip · corners</span>
-      </div>
-      <div class="row">
-        <span class="keys">tap <kbd>N</kbd><kbd>J</kbd><kbd>L</kbd><kbd>H</kbd></span>
-        <span class="what">back to rest mouth</span>
-      </div>
-      <div class="row">
-        <span class="keys"><kbd>0</kbd> + <kbd>1</kbd>–<kbd>5</kbd></span>
-        <span class="what">track from a corner</span>
-      </div>
-      <div class="row">
-        <span class="keys">tap <kbd>0</kbd></span>
-        <span class="what">back to centre</span>
-      </div>
-      <div class="row" id="lean-row">
-        <span class="keys">hold <kbd>space</kbd></span>
-        <span class="what">lean · gaze holds</span>
-      </div>
-      <div class="row">
-        <span class="keys">tap <kbd>R</kbd></span>
-        <span class="what">recalibrate mouth · retry camera</span>
-      </div>
-      <div class="row">
-        <span class="keys"><kbd>D</kbd></span>
-        <span class="what">skeleton overlay</span>
-      </div>
-      <div class="row" id="debug-row">
-        <span class="keys">tap <kbd>T</kbd></span>
-        <span class="what">camera + landmarks</span>
-      </div>
-      <div class="row" id="look-row">
-        <span class="keys">tap <kbd>G</kbd></span>
-        <span class="what">gaze crosshair (fullscreen)</span>
-      </div>
-      <p class="note">hold a mouse side button for every key</p>
-      <p class="note">scroll up opens, grows · down closes</p>
-      <p class="note">iris and pupils stay on <kbd>V</kbd><kbd>B</kbd> in both modes</p>
-    </aside>
 
     <!-- One panel for every device failure; the title, the detail and the fix
          come from `src/errors.ts` (classify), never from a raw Rust string. -->

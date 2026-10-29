@@ -20,6 +20,20 @@
   --maroon: #eba0ac;
 }
 
+/*
+ * The layout numbers come from `src/layout.ts`: the docked column's width and
+ * the letterboxed canvas rect. The shell writes them here and CSS only consumes
+ * them, so the arithmetic and the paint can never disagree about the window.
+ */
+:root {
+  --panel-width: 320px;
+  --dock-pad: 12px;
+  --view-x: 0px;
+  --view-y: 0px;
+  --view-w: 1280px;
+  --view-h: 720px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -36,70 +50,179 @@ body {
   color: var(--text);
 }
 
+/* Everything left of the dock: the face, and nothing else. */
 #stage {
   position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  inset: 0 var(--panel-width) 0 0;
+  overflow: hidden;
 }
 
-/* The buffer is a fixed 16:9 camera output; CSS only scales it to the window. */
+/* The buffer is a fixed 16:9 camera output; CSS places it at the integer
+   multiple of 16×9 the layout chose, so no edge lands on a half pixel. */
 #output {
+  position: absolute;
+  left: var(--view-x);
+  top: var(--view-y);
   display: block;
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: 100%;
-  aspect-ratio: 16 / 9;
+  width: var(--view-w);
+  height: var(--view-h);
   border-radius: 3px;
   box-shadow: 0 0 0 1px rgb(137 180 250 / 8%);
 }
 
+/* The docked column: head (fold toggle), body (preview, presets, keys), foot
+   (status line and its fixes). Folding it leaves the toggle and the dot. */
+.dock {
+  position: fixed;
+  inset: 0 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  width: var(--panel-width);
+  overflow: hidden;
+  border-left: 1px solid rgb(205 214 244 / 8%);
+  background: var(--mantle);
+  color: var(--subtext0);
+  font-size: 11px;
+}
+
+.dock-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 9px var(--dock-pad);
+  border-bottom: 1px solid rgb(205 214 244 / 6%);
+}
+
+.dock-title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--overlay0);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dock-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--surface1);
+  border-radius: 7px;
+  background: var(--surface0);
+  color: var(--subtext1);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.dock-toggle:hover {
+  border-color: var(--surface2);
+  background: var(--surface1);
+}
+
+.dock-glyph {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  transition: transform 180ms ease;
+}
+
+/* Folded: the column is one strip and the glyph points the other way. */
+body.folded .dock-glyph {
+  transform: rotate(180deg);
+}
+
+.dock-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 10px var(--dock-pad) 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.dock-foot {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px var(--dock-pad) var(--dock-pad);
+  border-top: 1px solid rgb(205 214 244 / 6%);
+}
+
+body.folded .dock-head {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+body.folded .dock-title,
+body.folded .dock-label,
+body.folded .dock-body,
+body.folded .dock-foot .input-hint {
+  display: none;
+}
+
+body.folded .hud {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+body.folded #hud-text {
+  display: none;
+}
+
 /*
  * Camera preview (`T`): the frame the landmarker just read, with its landmarks.
- * It sits in the gap between the cheeks, above the mouth band, and being HTML it
- * can never be read back into the virtual camera's output.
+ * It docks in the panel body, above the presets, and being HTML it can never be
+ * read back into the virtual camera's output.
  */
 .debug-camera {
-  position: fixed;
-  left: 50%;
-  bottom: 42px;
-  width: 320px;
-  height: 240px;
-  transform: translateX(-50%);
+  display: block;
+  width: 100%;
+  height: auto;
   border: 1px solid rgb(180 190 254 / 16%);
-  border-radius: 10px;
-  box-shadow: 0 10px 30px rgb(17 17 27 / 60%);
-  pointer-events: none;
+  border-radius: 8px;
+  background: var(--crust);
 }
 
 .debug-camera[hidden] {
   display: none;
 }
 
+/* The status line, at the foot of the dock. It is as wide as the column. */
 .hud {
-  position: fixed;
-  left: 16px;
-  bottom: 16px;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
-  max-width: calc(100% - 32px);
-  padding: 7px 12px;
+  width: 100%;
+  min-height: 26px;
+  padding: 5px 9px;
   overflow: hidden;
   border: 1px solid rgb(205 214 244 / 8%);
-  border-radius: 999px;
+  border-radius: 8px;
   background: rgb(17 17 27 / 72%);
-  backdrop-filter: blur(10px);
   color: var(--subtext0);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: 11px;
+  line-height: 1.45;
   white-space: nowrap;
-  text-overflow: ellipsis;
   pointer-events: none;
   transition: color 150ms ease;
+}
+
+/* The line ellipsises inside the pill instead of pushing the dot out of it. */
+#hud-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hud .dot {
@@ -135,24 +258,22 @@ body {
 /*
  * Shown while the controls only see the focused window: the backend needs
  * permission to read the input devices, which no amount of app code can grant.
+ * It wraps inside the dock instead of running off the edge of the screen.
  */
 .input-hint {
-  position: fixed;
-  left: 16px;
-  bottom: 55px;
-  max-width: calc(100% - 32px);
-  padding: 5px 11px;
-  overflow: hidden;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  width: 100%;
+  padding: 5px 9px;
   border: 1px solid rgb(249 226 175 / 20%);
-  border-radius: 999px;
+  border-radius: 8px;
   background: rgb(17 17 27 / 72%);
-  backdrop-filter: blur(10px);
   color: var(--yellow);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: 10.5px;
   line-height: 1.45;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   pointer-events: none;
 }
 
@@ -162,6 +283,7 @@ body {
 
 .input-hint code {
   color: var(--yellow);
+  overflow-wrap: anywhere;
 }
 
 /*
@@ -185,9 +307,8 @@ body {
   background: rgb(249 226 175 / 12%);
 }
 
-/* A second hint, stacked above the global-keys one. */
+/* A second hint under the first: the tracking camera's problems. */
 .track-hint {
-  bottom: 90px;
   border-color: rgb(243 139 168 / 22%);
   color: var(--maroon);
 }
@@ -300,27 +421,22 @@ body {
   }
 }
 
-/* The side panels would sit under the corner marks, so they step out of the
-   way while the layer is up. The calibration panel stays: it owns Next. */
-body.looking .guide,
-body.looking .hud,
-body.looking .input-hint,
-body.looking .calibrate-group {
+/* The dock would sit under the corner marks, so it steps out of the way while
+   the layer is up. The calibration dialog stays: it owns Next. */
+body.looking .dock {
   display: none;
 }
 
 /*
- * Calibration controls: one button per part of the face, in the empty band
- * above the brows. The panel below is the step-by-step run, with the camera
- * inside so the pose can be checked as it is measured.
+ * Calibration presets: one button per part of the face, at the top of the dock.
+ * The dialog below is the step-by-step run, with the camera inside so the pose
+ * can be checked as it is measured.
  */
 .calibrate-group {
-  position: fixed;
-  top: 14px;
-  left: 50%;
   display: flex;
-  gap: 8px;
-  transform: translateX(-50%);
+  flex: none;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .calibrate-group[hidden] {
@@ -328,14 +444,16 @@ body.looking .calibrate-group {
 }
 
 .calibrate-button {
-  padding: 6px 14px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 10px;
   border: 1px solid rgb(137 180 250 / 32%);
   border-radius: 999px;
   background: rgb(17 17 27 / 82%);
-  backdrop-filter: blur(10px);
   color: var(--subtext1);
   font: inherit;
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
   transition: border-color 150ms ease, background 150ms ease;
 }
@@ -357,15 +475,18 @@ body[data-mode="manual"] .calibrate-group {
   display: none;
 }
 
+/*
+ * The calibration run: a dialog centred over the stage. It is the one thing
+ * allowed to cover the face, and only while a step is being measured.
+ */
 .calibration {
   position: fixed;
-  left: 50%;
-  bottom: 42px;
+  top: 50%;
+  left: calc((100% - var(--panel-width, 320px)) / 2);
   z-index: 5;
-  width: 360px;
-  max-width: calc(100% - 32px);
+  width: min(360px, calc(100% - var(--panel-width, 320px) - 32px));
   padding: 12px 14px 14px;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   border: 1px solid rgb(137 180 250 / 24%);
   border-radius: 16px;
   background: rgb(17 17 27 / 96%);
@@ -465,20 +586,15 @@ body[data-mode="manual"] .calibrate-group {
 }
 
 /*
- * Shortcut legend. It sits in the dead band above the 16:9 canvas, so it does
- * not cover the face — and being HTML, it can never end up in the frames that
- * are read back for the camera.
+ * The shortcut legend, at the bottom of the dock's scrolling body. It is part
+ * of the column now: the canvas never has a control floating over it.
  */
 .guide {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  width: 238px;
-  padding: 10px 12px 9px;
-  border: 1px solid rgb(205 214 244 / 8%);
-  border-radius: 12px;
-  background: rgb(17 17 27 / 72%);
-  backdrop-filter: blur(10px);
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--subtext0);
   font-size: 11px;
   line-height: 1.35;
@@ -496,8 +612,8 @@ body[data-mode="manual"] .calibrate-group {
 
 .guide .row {
   display: grid;
-  grid-template-columns: 86px 1fr;
-  gap: 7px;
+  grid-template-columns: 78px 1fr;
+  gap: 6px;
   align-items: baseline;
   padding: 1px 0;
 }

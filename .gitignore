@@ -30,3 +30,6 @@ skills-lock.json
 # Local preview renders and scratch work
 .preview-tmp/
 preview-*.png
+
+# agent session lock
+.agent-lock/

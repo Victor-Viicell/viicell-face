@@ -26,3 +26,33 @@ changed, what was verified and how, what was NOT verified.
   over the canvas.
 * The alpha working tree was committed as a checkpoint before any rework
   (`alpha snapshot`), so every later session's diff is readable.
+
+## 2026-10-29 — session 1 — VF-003 settings store
+
+* **Changed**: `src/settings.ts` (+ `src/settings.test.ts`) — the store: typed
+  `Settings` (version, output w/h/fps, deviceId, cameraId, gazeOrigin, accent,
+  startMode, window w/h/x/y), `DEFAULT_SETTINGS`, `mergeSettings` (unknown keys
+  dropped, every field validated on its own, sizes rounded even and clamped to
+  160–1920 / 90–1080, fps 1–120, accent `#rrggbb`, origin/mode whitelisted),
+  `parseSettings` (corrupt/empty ⇒ defaults), `serializeSettings` (stable text),
+  and `SettingsStore` with `load/set/save/flush/subscribe/dispose` and one
+  debounced write behind an injectable `SettingsAdapter`.
+  `src-tauri/src/lib.rs` — `read_settings`/`write_settings` commands over
+  `<app config dir>/settings.json`, JSON-validated and renamed into place from
+  `settings.json.tmp`; both registered in `generate_handler!`.
+  `src/main.ts` — store built at module scope (Tauri adapter, `null` in the
+  browser preview), `boot()` awaits `load()` *before* Pixi init and drives
+  canvas size, rig scale, `set_tick_rate` and `connect()`/`startCamera` from it;
+  the gaze origin is restored at boot and saved when picked with `0`+`1`–`5`.
+  `src/config.ts` — `OUTPUT` is now `DEFAULT_SETTINGS.output` (defaults have one
+  home). `README.md` — "Changing the output" rewritten for the settings file,
+  "Eye tracking" notes the origin is remembered.
+* **Verified**: `scripts/check.sh` → CHECK GREEN (tsc clean; `bun test` 193 pass
+  across 10 files, 26 of them new; `vite build` ok; `cargo test --lib` 21 passed
+  + 1 ignored, 6 new ones covering the file path in a temp dir; `cargo check`
+  ok). Windows compile gate still SKIP (no target installed).
+* **Not verified**: the live path — boot read, and a key-press save surviving a
+  restart. Both need a display, so no session has run the app. Also unverified:
+  the settings path on Windows/Android (`app_config_dir` untested there), and
+  whether the window keeps any position between runs (nothing reads
+  `window.*` yet).

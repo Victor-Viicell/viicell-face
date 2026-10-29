@@ -12,7 +12,7 @@ Ticket format: **goal** — *acceptance* (the thing that must be true) — files
 
 ## Phase A — ground truth (make the repo trustworthy)
 
-- [ ] **VF-003 settings store** — a typed, persisted config (JSON in the app
+- [x] **VF-003 settings store** — a typed, persisted config (JSON in the app
   config dir via `app_config_dir`, defaults, forward-compatible merge, one
   `save()` debounce), covering output res/fps, device id, camera id, origin,
   accent, mode, window state. Pure logic unit-tested, no DOM.

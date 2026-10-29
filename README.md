@@ -44,7 +44,12 @@ both.
 | `src/face/crop.ts` | The preview's face framing: padding, aspect and easing (unit tested) |
 | `src/input.ts` | One control stream from the devices or the focused window |
 | `src/errors.ts` | Device failures → one `AppError` (code, headline, raw detail, fix command), pure and unit tested |
-| `src/main.ts` | PixiJS app, frame pump, mode switching, HUD |
+| `src/hud.ts` | The status line as a pure string builder over one snapshot (unit tested) |
+| `src/shell.ts` | The only module that touches element ids: HUD, error panel, hints, calibration panel, look overlay |
+| `src/stream.ts` | The frame pump and the once-a-second health poll against the Rust backend |
+| `src/controls.ts` | Keys and wheel: posing the face by hand, and picking the gaze origin |
+| `src/track_view.ts` | Camera mode: tracking camera, the full-monitor crosshair, the calibration flow |
+| `src/main.ts` | Boot and wiring: builds the app, the rig and the singletons, connects them |
 | `src/camera.ts` / `src/face_camera.ts` / `src/microphone.ts` | Typed bridges to the Rust commands |
 | `src-tauri/src/virtual_camera.rs` | Device discovery, RGBA → YUYV, writer thread |
 | `src-tauri/src/face_camera.rs` | Webcam capture, MJPG passthrough, frame slot |
@@ -138,7 +143,7 @@ paints both mirrored eyes and follows a pupil as it is scaled. The cached
 The backdrop is a full-artboard quad behind the rig, drawn by a fragment shader
 (`backdrop.ts`): a radial lift from Mantle to Crust, two slow Sapphire and Mauve
 auroras, and a one-step dither that keeps the shallow gradient from banding in
-the YUYV output. `main.ts` advances its clock with the ticker, and `app.extract`
+the YUYV output. `stream.ts` advances the clock with the ticker, and `app.extract`
 renders the filtered backdrop like any other object.
 
 Press **D** in the window to show the skeleton: a dot on every pivot, a line to
